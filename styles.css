@@ -254,3 +254,16 @@ input, select {
 .cal-legend i.d2 { background: #8fdcbd; }
 .cal-legend i.d3 { background: #45c598; }
 .cal-legend i.d4 { background: #0ca678; }
+
+/* ---------- revisões agrupadas ---------- */
+.box.dash { border-style: dashed; }
+.revtag { font-size: 11px; color: var(--azul-forte); background: var(--azul-claro); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.rev-group-head { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 2px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.rev-group:first-child .rev-group-head { margin-top: 4px; }
+.rev-group-head .rev-count { font-size: 11px; font-weight: 400; color: var(--text-3); background: var(--surface-2); padding: 2px 9px; border-radius: 999px; }
+
+/* ---------- tabela do Sobre ---------- */
+.sobre-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sobre-tbl td { padding: 7px 0; border-bottom: 1px solid var(--border); color: var(--text-2); }
+.sobre-tbl tr:last-child td { border-bottom: none; }
+.sobre-tbl td:last-child { text-align: right; font-weight: 600; color: var(--azul-forte); white-space: nowrap; }

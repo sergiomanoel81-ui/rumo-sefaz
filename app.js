@@ -534,32 +534,58 @@
   /* ============================ TELA: REVISÕES =========================== */
   function renderRevisoes() {
     const hoje = S.hojeISO();
+    const DOW = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    function labelData(iso) {
+      if (iso <= hoje) return "Hoje";
+      if (iso === S.addDiasISO(hoje, 1)) return "Amanhã";
+      const dow = DOW[new Date(iso + "T00:00:00").getDay()];
+      return `${dow} ${iso.slice(8)}/${iso.slice(5, 7)}`;
+    }
+    function ordinal(r) {
+      const todas = estado.revisoes
+        .filter((x) => x.topicoId === r.topicoId)
+        .sort((a, b) => a.data.localeCompare(b.data));
+      return todas.findIndex((x) => x.id === r.id) + 1;
+    }
+    function linha(r, due) {
+      const n = nomeTopico(r.topicoId);
+      return `<div class="task" data-rev="${r.id}">
+        ${due ? '<button class="box">✓</button>' : '<span class="box dash"></span>'}
+        <div class="txt"><div class="mat">${n.mat}</div>${n.top}</div>
+        <span class="revtag">${ordinal(r)}ª revisão</span>
+      </div>`;
+    }
+
     const pend = estado.revisoes.filter((r) => !r.feito).sort((a, b) => a.data.localeCompare(b.data));
     const dueHoje = pend.filter((r) => r.data <= hoje);
     const prox = pend.filter((r) => r.data > hoje);
 
-    function linha(r, due) {
-      const n = nomeTopico(r.topicoId);
-      return `<div class="task" data-rev="${r.id}">
-        ${due ? '<button class="box">✓</button>' : '<span class="box" style="border-style:dashed"></span>'}
-        <div class="txt"><div class="mat">${n.mat}</div>${n.top}</div>
-        <span class="meta">${due ? "hoje" : r.data.slice(8) + "/" + r.data.slice(5, 7)}</span>
-      </div>`;
-    }
+    const grupos = [];
+    prox.forEach((r) => {
+      let g = grupos.find((x) => x.data === r.data);
+      if (!g) { g = { data: r.data, itens: [] }; grupos.push(g); }
+      g.itens.push(r);
+    });
+    const gruposHTML = grupos.slice(0, 10).map((g) => `
+      <div class="rev-group">
+        <div class="rev-group-head"><span>${labelData(g.data)}</span><span class="rev-count">${g.itens.length}</span></div>
+        ${g.itens.map((r) => linha(r, false)).join("")}
+      </div>`).join("");
 
     el("view-revisoes").innerHTML = `
       <div class="card">
-        <h3>Para revisar hoje <span style="color:var(--text-3);font-weight:400">(${dueHoje.length})</span></h3>
-        ${dueHoje.length ? dueHoje.map((r) => linha(r, true)).join("") : '<div class="empty">Nada pendente. Mandou bem! ✨</div>'}
+        <h3>Para revisar hoje <span style="color:var(--text-3);font-weight:400">(${dueHoje.length})</span> ${hlp("revisoes")}</h3>
+        ${dueHoje.length ? dueHoje.map((r) => linha(r, true)).join("") : '<div class="empty">Nada pendente por enquanto. ✨</div>'}
       </div>
       <div class="card">
-        <h3>Próximas revisões</h3>
-        ${prox.length ? prox.slice(0, 12).map((r) => linha(r, false)).join("") : '<div class="empty">Conforme você conclui tópicos, as revisões aparecem aqui.</div>'}
+        <h3>Agenda de revisões</h3>
+        <p style="font-size:12px;color:var(--text-3);margin:0 0 6px">Cada tópico concluído volta pra revisar em <strong>1, 7, 15 e 30 dias</strong>. Por isso o mesmo assunto reaparece em datas diferentes — é de propósito, pra fixar.</p>
+        ${grupos.length ? gruposHTML : '<div class="empty">Conforme você conclui tópicos, as revisões aparecem aqui.</div>'}
       </div>
     `;
-    el("view-revisoes").querySelectorAll('.task[data-rev] .box').forEach((box) => {
+    el("view-revisoes").querySelectorAll('.task[data-rev] button.box').forEach((box) => {
       const node = box.closest(".task[data-rev]");
-      if (box.tagName === "BUTTON") box.addEventListener("click", () => {
+      box.addEventListener("click", () => {
         const r = estado.revisoes.find((x) => x.id === node.dataset.rev);
         if (r) { r.feito = true; salvar(); renderRevisoes(); }
       });
@@ -650,6 +676,43 @@
     el("view-historico").querySelectorAll(".cal-cell[data-dia]").forEach((c) =>
       c.addEventListener("click", () => verDia(c.dataset.dia))
     );
+  }
+
+  /* ============================ TELA: SOBRE =============================== */
+  function renderSobre() {
+    const gerais = [
+      ["Língua Portuguesa", 7], ["Direito Constitucional", 5], ["Direito Administrativo", 5],
+      ["Direito Tributário", 5], ["Contabilidade Geral", 5], ["Estatística", 5], ["Noções de Igualdade Racial", 3],
+    ];
+    const linhasGerais = gerais.map(([n, q]) => `<tr><td>${n}</td><td>${q} questões</td></tr>`).join("");
+    el("view-sobre").innerHTML = `
+      <div class="card">
+        <h3>Em que este app se baseia</h3>
+        <p style="font-size:14px;color:var(--text-2);line-height:1.6">A lista de matérias e a prioridade de cada uma vêm da <strong>última prova já realizada</strong> para o cargo: concurso <strong>SEFAZ-BA — Agente de Tributos Estaduais</strong>, aplicado pela banca <strong>FGV em 2022</strong> (70 questões objetivas). Os pesos do cronograma seguem quantas questões cada matéria teve nessa prova — não são chutes.</p>
+      </div>
+      <div class="card">
+        <h3>Distribuição da prova — FGV 2022</h3>
+        <p style="font-size:13px;color:var(--text-3);margin:0 0 8px">Conhecimentos gerais (35 de 70 questões):</p>
+        <table class="sobre-tbl">${linhasGerais}</table>
+        <p style="font-size:13px;color:var(--text-2);margin:12px 0 0;line-height:1.6">Nas questões específicas da área de <strong>Administração Tributária</strong>, o maior bloco foi <strong>Legislação Tributária da Bahia (~25 questões)</strong> — por isso ela entra como prioridade máxima no app.</p>
+      </div>
+      <div class="card">
+        <h3>Concurso atual (2026)</h3>
+        <p style="font-size:14px;color:var(--text-2);line-height:1.6">O concurso de 2026 foi autorizado com cerca de 200 vagas (Auditor e Agente), banca <strong>Cesgranrio</strong>. Até a publicação do edital oficial, o app usa como referência a prova de 2022. <strong>Quando o edital da Cesgranrio sair, as matérias e os pesos serão recalibrados por ele.</strong></p>
+      </div>
+      <div class="card">
+        <h3>Métodos de estudo usados</h3>
+        <ul style="font-size:14px;color:var(--text-2);line-height:1.7;margin:0;padding-left:18px">
+          <li><strong>Revisão espaçada:</strong> cada tópico volta pra revisão em 1, 7, 15 e 30 dias.</li>
+          <li><strong>Ciclo de estudos:</strong> prioriza as matérias pelo peso que tiveram na prova.</li>
+          <li><strong>Cronograma semanal:</strong> distribui os tópicos pelos dias de estudo.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Transparência</h3>
+        <p style="font-size:14px;color:var(--text-2);line-height:1.6">Este app é uma ferramenta de <strong>organização</strong>, montada a partir de dados públicos da prova anterior. Ele <strong>não substitui o edital oficial</strong> e o conteúdo é um ponto de partida que pode ser editado e ajustado a qualquer momento.</p>
+      </div>
+    `;
   }
 
   /* --------------------------- toast simples ------------------------------- */
@@ -770,7 +833,7 @@
   }
 
   /* --------------------------- roteador ------------------------------------ */
-  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico };
+  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico, sobre: renderSobre };
   function irPara(view) {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     el("view-" + view).classList.add("active");
