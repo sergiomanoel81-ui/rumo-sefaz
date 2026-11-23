@@ -1,45 +1,31 @@
 /* ===========================================================================
    Rumo à SEFAZ — estilos. Mobile-first, otimizado para tablet (paisagem).
    =========================================================================== */
+/* Tema claro, fundo branco com tons de verde (estilo Estudei).
+   Os tokens mantêm o nome --azul por compatibilidade, mas valem verde. */
 :root {
-  --azul: #185fa5;
-  --azul-forte: #0c447c;
-  --azul-claro: #e6f1fb;
-  --bg: #f6f7f9;
+  color-scheme: light;
+  --azul: #0ca678;         /* verde principal */
+  --azul-forte: #0a7e5b;   /* verde escuro (texto sobre verde claro) */
+  --azul-claro: #e4f7ef;   /* verde bem claro (fundos de selo) */
+  --bg: #f3f8f5;           /* fundo quase branco, leve tom verde */
   --surface: #ffffff;
-  --surface-2: #f1f3f6;
-  --text: #1a1d21;
-  --text-2: #5d6470;
-  --text-3: #8b93a1;
-  --border: #e3e7ec;
-  --ok: #1d9e75;
-  --ok-bg: #e1f5ee;
-  --warn: #ba7517;
-  --warn-bg: #faeeda;
-  --maxima: #993556;
-  --alta: #185fa5;
-  --media: #ba7517;
-  --baixa: #5f5e5a;
+  --surface-2: #eef3f0;
+  --text: #16211d;
+  --text-2: #55655e;
+  --text-3: #8a978f;
+  --border: #e1e8e3;
+  --ok: #0ca678;
+  --ok-bg: #e4f7ef;
+  --warn: #b26a0f;
+  --warn-bg: #fbeed8;
+  --maxima: #075e43;       /* verde escuro (selo máxima) */
+  --maxima-bg: #c4efdf;
+  --alta: #0a7e5b;
+  --media: #b26a0f;
+  --baixa: #5f6b65;
   --radius: 12px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --azul: #4a93de;
-    --azul-forte: #85b7eb;
-    --azul-claro: #0c2f52;
-    --bg: #14171c;
-    --surface: #1b1f26;
-    --surface-2: #232832;
-    --text: #eef1f5;
-    --text-2: #aab3c0;
-    --text-3: #7b8494;
-    --border: #2b313b;
-    --ok: #5dcaa5;
-    --ok-bg: #0f3d31;
-    --warn: #ef9f27;
-    --warn-bg: #3c2a0c;
-  }
+  --shadow: 0 1px 2px rgba(16, 40, 30, 0.05);
 }
 
 * { box-sizing: border-box; }
@@ -145,7 +131,7 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .mat-row .nome { flex: 1; font-size: 14px; }
 .mat-row .peso { font-size: 12px; color: var(--text-3); }
 .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: none; }
-.badge.maxima { background: #f6e3ea; color: var(--maxima); }
+.badge.maxima { background: var(--maxima-bg); color: var(--maxima); }
 .badge.alta { background: var(--azul-claro); color: var(--azul-forte); }
 .badge.media { background: var(--warn-bg); color: var(--warn); }
 .badge.baixa { background: var(--surface-2); color: var(--baixa); }
