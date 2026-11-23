@@ -5,11 +5,14 @@
   const S = window.SEFAZ;
   let estado = S.carregarEstado();
 
-  // Migração: adiciona matérias novas da semente que ainda não existem no
-  // estado salvo (ex.: Informática), sem apagar o progresso da usuária.
-  function migrarMaterias() {
-    let next = estado.materias.reduce((mx, m) => Math.max(mx, m.ordem), -1) + 1;
+  // Migração de conteúdo: adiciona matérias/tópicos novos do edital e atualiza
+  // os já existentes, SEM apagar o que a usuária já estudou (tópicos com
+  // progresso são preservados; só os ainda 'novo' são substituídos pelos do
+  // conteúdo atualizado).
+  function migrarConteudo() {
     let mudou = false;
+    let next = estado.materias.reduce((mx, m) => Math.max(mx, m.ordem), -1) + 1;
+    // 1) matérias faltantes
     S.SEED.materias.forEach((sm) => {
       if (!estado.materias.some((m) => m.nome === sm.nome)) {
         estado.materias.push({
@@ -19,9 +22,25 @@
         mudou = true;
       }
     });
+    // 2) enriquece tópicos quando a versão do conteúdo subiu
+    if ((estado.contentVersion || 1) < S.SEED.contentVersion) {
+      S.SEED.materias.forEach((sm) => {
+        const m = estado.materias.find((x) => x.nome === sm.nome);
+        if (!m) return;
+        m.pesoQ = sm.pesoQ;
+        const mantidos = m.topicos.filter((t) => t.status !== "novo"); // preserva progresso
+        const novos = sm.topicos
+          .filter((tn) => !mantidos.some((t) => t.nome === tn))
+          .map((tn) => ({ id: S.uid("top"), nome: tn, status: "novo", estudadoEm: null }));
+        m.topicos = [...mantidos, ...novos].map((t, j) => ({ ...t, ordem: j }));
+      });
+      estado.contentVersion = S.SEED.contentVersion;
+      estado.perfil.planoDia = null; // ids antigos podem não existir mais
+      mudou = true;
+    }
     if (mudou) S.salvarEstado(estado);
   }
-  migrarMaterias();
+  migrarConteudo();
 
   /* --------------------------- helpers de prioridade ----------------------- */
   const DIAS_NOME = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -121,22 +140,24 @@
   // os concluídos continuam aparecendo marcados. Troca só quando vira o dia.
   function planoDeHoje() {
     const dia = diaDoPlano();
+    const resolver = (ids) => {
+      const itens = [];
+      ids.forEach((id) => {
+        for (const m of estado.materias) {
+          const t = m.topicos.find((x) => x.id === id);
+          if (t) { itens.push({ mat: m, top: t }); break; }
+        }
+      });
+      return itens;
+    };
     const pd = estado.perfil.planoDia;
-    let ids;
-    if (pd && pd.data === dia && Array.isArray(pd.ids) && pd.ids.length) {
-      ids = pd.ids;
-    } else {
-      ids = ordenarPendentes().slice(0, Math.max(1, estado.perfil.topicosPorDia)).map((x) => x.top.id);
+    let itens = (pd && pd.data === dia && Array.isArray(pd.ids)) ? resolver(pd.ids) : [];
+    if (!itens.length) {
+      const ids = ordenarPendentes().slice(0, Math.max(1, estado.perfil.topicosPorDia)).map((x) => x.top.id);
       estado.perfil.planoDia = { data: dia, ids };
       salvar();
+      itens = resolver(ids);
     }
-    const itens = [];
-    ids.forEach((id) => {
-      for (const m of estado.materias) {
-        const t = m.topicos.find((x) => x.id === id);
-        if (t) { itens.push({ mat: m, top: t }); break; }
-      }
-    });
     return { dia, itens };
   }
 
@@ -718,11 +739,19 @@
         <h3>Distribuição da prova — FGV 2022</h3>
         <p style="font-size:13px;color:var(--text-3);margin:0 0 8px">Conhecimentos gerais (35 de 70 questões):</p>
         <table class="sobre-tbl">${linhasGerais}</table>
-        <p style="font-size:13px;color:var(--text-2);margin:12px 0 0;line-height:1.6">Nas questões específicas da área de <strong>Administração Tributária</strong>, o maior bloco foi <strong>Legislação Tributária da Bahia (~25 questões)</strong> — por isso ela entra como prioridade máxima no app.</p>
+        <p style="font-size:13px;color:var(--text-2);margin:12px 0 0;line-height:1.6">As <strong>específicas da área de Administração Tributária</strong> (35 questões) são: <strong>Legislação Tributária da Bahia (~25 questões)</strong>, <strong>Noções de Informática</strong> e <strong>Raciocínio Lógico-Matemático</strong>.</p>
       </div>
       <div class="card">
-        <h3>Matérias incluídas por precaução</h3>
-        <p style="font-size:14px;color:var(--text-2);line-height:1.6"><strong>Noções de Informática</strong> e <strong>Raciocínio Lógico-Matemático</strong> foram incluídas por serem matérias muito comuns em provas da banca <strong>Cesgranrio</strong>, mesmo não estando na prova de 2022. Os pesos delas são uma estimativa e serão confirmados quando o edital sair. Você pode ajustar a prioridade de cada uma na aba Cronograma.</p>
+        <h3>Legislação Tributária da Bahia</h3>
+        <p style="font-size:14px;color:var(--text-2);line-height:1.6">É o maior peso da prova. Segundo o edital, abrange:</p>
+        <ul style="font-size:13px;color:var(--text-2);line-height:1.7;margin:8px 0 0;padding-left:18px">
+          <li>ICMS da Bahia — Lei 7.014/1996</li>
+          <li>ITCMD — Lei 4.826/1989</li>
+          <li>IPVA — Lei 6.348/1991</li>
+          <li>Código Tributário do Estado da Bahia — Lei 3.956/1981</li>
+          <li>Simples Nacional — LC 123/2006</li>
+          <li>Conselho de Fazenda Estadual — Decreto 7.592/1991</li>
+        </ul>
       </div>
       <div class="card">
         <h3>Concurso atual (2026)</h3>
