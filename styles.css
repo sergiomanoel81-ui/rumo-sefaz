@@ -267,3 +267,6 @@ input, select {
 .sobre-tbl td { padding: 7px 0; border-bottom: 1px solid var(--border); color: var(--text-2); }
 .sobre-tbl tr:last-child td { border-bottom: none; }
 .sobre-tbl td:last-child { text-align: right; font-weight: 600; color: var(--azul-forte); white-space: nowrap; }
+
+/* ---------- banner informativo ---------- */
+.banner { background: var(--azul-claro); color: var(--azul-forte); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; line-height: 1.5; margin-bottom: 14px; }

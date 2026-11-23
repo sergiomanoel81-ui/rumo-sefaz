@@ -113,6 +113,31 @@ const SEED = {
       ],
     },
     {
+      nome: "Noções de Informática",
+      pesoQ: 5,
+      topicos: [
+        "Conceitos de hardware e software",
+        "Sistemas operacionais (Windows)",
+        "Editor de textos (Word)",
+        "Planilhas (Excel)",
+        "Internet e navegadores",
+        "Correio eletrônico",
+        "Segurança da informação",
+      ],
+    },
+    {
+      nome: "Raciocínio Lógico-Matemático",
+      pesoQ: 5,
+      topicos: [
+        "Proposições e conectivos lógicos",
+        "Tabelas-verdade",
+        "Argumentos e validade",
+        "Sequências e padrões",
+        "Análise combinatória",
+        "Problemas e raciocínio quantitativo",
+      ],
+    },
+    {
       nome: "Noções de Igualdade Racial",
       pesoQ: 3,
       topicos: [

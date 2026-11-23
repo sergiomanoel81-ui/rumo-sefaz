@@ -5,6 +5,24 @@
   const S = window.SEFAZ;
   let estado = S.carregarEstado();
 
+  // Migração: adiciona matérias novas da semente que ainda não existem no
+  // estado salvo (ex.: Informática), sem apagar o progresso da usuária.
+  function migrarMaterias() {
+    let next = estado.materias.reduce((mx, m) => Math.max(mx, m.ordem), -1) + 1;
+    let mudou = false;
+    S.SEED.materias.forEach((sm) => {
+      if (!estado.materias.some((m) => m.nome === sm.nome)) {
+        estado.materias.push({
+          id: S.uid("mat"), nome: sm.nome, pesoQ: sm.pesoQ, prioridade: "auto", ordem: next++,
+          topicos: sm.topicos.map((t, j) => ({ id: S.uid("top"), nome: t, ordem: j, status: "novo", estudadoEm: null })),
+        });
+        mudou = true;
+      }
+    });
+    if (mudou) S.salvarEstado(estado);
+  }
+  migrarMaterias();
+
   /* --------------------------- helpers de prioridade ----------------------- */
   const DIAS_NOME = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
   const TIERS = ["baixa", "media", "alta", "maxima"];
@@ -38,16 +56,20 @@
         .filter((t) => t.status !== "concluido")
         .sort((x, y) => x.ordem - y.ordem),
     }));
+    // Interleave por rodadas: em cada volta, a rodada 1 passa por todas as
+    // matérias (1 tópico cada), a rodada 2 só pelas de peso >= 2, e assim por
+    // diante. Isso VARIA as matérias dentro do dia, mas as de maior prioridade
+    // reaparecem mais vezes ao longo do ciclo.
     const out = [];
-    let restante = filas.reduce((s, f) => s + f.tops.length, 0);
+    const maxW = Math.max(1, ...filas.map((f) => f.w));
+    const total = filas.reduce((s, f) => s + f.tops.length, 0);
     let guarda = 0;
-    while (restante > 0 && guarda++ < 5000) {
+    while (out.length < total && guarda++ < 10000) {
       let avancou = false;
-      for (const f of filas) {
-        for (let k = 0; k < f.w; k++) {
-          if (f.tops.length) {
+      for (let round = 1; round <= maxW; round++) {
+        for (const f of filas) {
+          if (f.w >= round && f.tops.length) {
             out.push({ mat: f.m, top: f.tops.shift() });
-            restante--;
             avancou = true;
           }
         }
@@ -235,7 +257,8 @@
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <h3>Plano de hoje <span style="color:var(--text-3);font-weight:400">(${feitos}/${itens.length})</span> ${hlp("hoje")}</h3>
+            <h3>Plano recomendado de hoje <span style="color:var(--text-3);font-weight:400">(${feitos}/${itens.length})</span> ${hlp("hoje")}</h3>
+            <p style="font-size:12px;color:var(--text-3);margin:0 0 8px">Escolhido automaticamente pelo seu cronograma, com as matérias que mais pesam na prova.</p>
             ${avisoDescanso}
             ${tarefasHTML}
           </div>
@@ -328,6 +351,7 @@
     }
 
     el("view-cronograma").innerHTML = `
+      <div class="banner">📌 Este é o seu <strong>cronograma recomendado</strong> — montado automaticamente pelos pesos da prova. Tudo aqui é ajustável por você.</div>
       <div class="sec-title">Modo de estudo ${hlp("modo")}</div>
       <div class="seg">
         <button data-modo="ciclo" class="${p.modo === "ciclo" ? "on" : ""}">Ciclo de Estudos</button>
@@ -695,6 +719,10 @@
         <p style="font-size:13px;color:var(--text-3);margin:0 0 8px">Conhecimentos gerais (35 de 70 questões):</p>
         <table class="sobre-tbl">${linhasGerais}</table>
         <p style="font-size:13px;color:var(--text-2);margin:12px 0 0;line-height:1.6">Nas questões específicas da área de <strong>Administração Tributária</strong>, o maior bloco foi <strong>Legislação Tributária da Bahia (~25 questões)</strong> — por isso ela entra como prioridade máxima no app.</p>
+      </div>
+      <div class="card">
+        <h3>Matérias incluídas por precaução</h3>
+        <p style="font-size:14px;color:var(--text-2);line-height:1.6"><strong>Noções de Informática</strong> e <strong>Raciocínio Lógico-Matemático</strong> foram incluídas por serem matérias muito comuns em provas da banca <strong>Cesgranrio</strong>, mesmo não estando na prova de 2022. Os pesos delas são uma estimativa e serão confirmados quando o edital sair. Você pode ajustar a prioridade de cada uma na aba Cronograma.</p>
       </div>
       <div class="card">
         <h3>Concurso atual (2026)</h3>

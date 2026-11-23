@@ -1,11 +1,11 @@
-const CACHE = "rumo-sefaz-v5";
+const CACHE = "rumo-sefaz-v6";
 const CORE = [
   "./",
   "index.html",
-  "styles.css?v=5",
-  "data.js?v=5",
-  "app.js?v=5",
-  "vendor/Sortable.min.js?v=5",
+  "styles.css?v=6",
+  "data.js?v=6",
+  "app.js?v=6",
+  "vendor/Sortable.min.js?v=6",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",
