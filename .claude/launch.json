@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sefaz-pwa",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8750"],
+      "port": 8750
+    }
+  ]
+}

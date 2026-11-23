@@ -1,0 +1,218 @@
+/* ===========================================================================
+   Rumo à SEFAZ — estilos. Mobile-first, otimizado para tablet (paisagem).
+   =========================================================================== */
+:root {
+  --azul: #185fa5;
+  --azul-forte: #0c447c;
+  --azul-claro: #e6f1fb;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --text: #1a1d21;
+  --text-2: #5d6470;
+  --text-3: #8b93a1;
+  --border: #e3e7ec;
+  --ok: #1d9e75;
+  --ok-bg: #e1f5ee;
+  --warn: #ba7517;
+  --warn-bg: #faeeda;
+  --maxima: #993556;
+  --alta: #185fa5;
+  --media: #ba7517;
+  --baixa: #5f5e5a;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --azul: #4a93de;
+    --azul-forte: #85b7eb;
+    --azul-claro: #0c2f52;
+    --bg: #14171c;
+    --surface: #1b1f26;
+    --surface-2: #232832;
+    --text: #eef1f5;
+    --text-2: #aab3c0;
+    --text-3: #7b8494;
+    --border: #2b313b;
+    --ok: #5dcaa5;
+    --ok-bg: #0f3d31;
+    --warn: #ef9f27;
+    --warn-bg: #3c2a0c;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+h1, h2, h3 { font-weight: 600; margin: 0; }
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- cabeçalho ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar .concurso { font-size: 13px; color: var(--text-2); }
+.topbar .concurso strong { color: var(--text); font-weight: 600; }
+.chip {
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---------- área principal ---------- */
+.main { flex: 1; padding: 16px; padding-bottom: 88px; }
+.view { display: none; }
+.view.active { display: block; }
+
+.saudacao { font-size: 20px; margin-bottom: 14px; }
+.sec-title {
+  font-size: 15px; font-weight: 600; margin: 4px 0 10px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sec-title .link { font-size: 13px; color: var(--azul); font-weight: 500; background: none; border: none; }
+
+/* ---------- cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+}
+.card h3 { font-size: 14px; margin-bottom: 10px; }
+
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
+.tile .lbl { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .4px; }
+.tile .val { font-size: 22px; font-weight: 600; margin-top: 2px; }
+.tile .val small { font-size: 13px; color: var(--text-3); font-weight: 400; }
+
+/* ---------- lista de tarefas (plano do dia) ---------- */
+.task { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.task:last-child { border-bottom: none; }
+.task .box { width: 22px; height: 22px; border: 2px solid var(--border); border-radius: 6px; flex: none; display: flex; align-items: center; justify-content: center; background: none; color: #fff; }
+.task.done .box { background: var(--ok); border-color: var(--ok); }
+.task .txt { flex: 1; font-size: 14px; }
+.task.done .txt { color: var(--text-3); text-decoration: line-through; }
+.task .meta { font-size: 12px; color: var(--text-3); }
+.task .mat { font-size: 11px; color: var(--azul); }
+
+/* ---------- barra de progresso ---------- */
+.bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--azul); border-radius: 999px; }
+.row-prog { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+.row-prog .nome { flex: 1; }
+.row-prog .bar { flex: 2; }
+.row-prog .pct { width: 38px; text-align: right; color: var(--text-3); }
+
+/* ---------- cronograma: matérias por prioridade ---------- */
+.seg { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.seg button { flex: 1; padding: 10px; border: none; background: var(--surface); color: var(--text-2); font-size: 14px; }
+.seg button.on { background: var(--azul); color: #fff; font-weight: 600; }
+
+.mat-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.mat-row:last-child { border-bottom: none; }
+.mat-row .grip { color: var(--text-3); cursor: grab; }
+.mat-row .nome { flex: 1; font-size: 14px; }
+.mat-row .peso { font-size: 12px; color: var(--text-3); }
+.badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: none; }
+.badge.maxima { background: #f6e3ea; color: var(--maxima); }
+.badge.alta { background: var(--azul-claro); color: var(--azul-forte); }
+.badge.media { background: var(--warn-bg); color: var(--warn); }
+.badge.baixa { background: var(--surface-2); color: var(--baixa); }
+
+.config { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+.config .cfg { background: var(--surface-2); border-radius: var(--radius); padding: 10px; text-align: center; }
+.config .cfg .k { font-size: 11px; color: var(--text-3); }
+.config .cfg .v { font-size: 15px; font-weight: 600; margin-top: 2px; }
+.estimativa { border: 1px dashed var(--border); border-radius: var(--radius); padding: 12px; text-align: center; font-size: 14px; color: var(--text-2); }
+.estimativa strong { color: var(--azul); }
+
+/* ---------- formulários ---------- */
+label { font-size: 13px; color: var(--text-2); display: block; margin: 10px 0 4px; }
+input, select {
+  width: 100%; padding: 10px 12px; font-size: 15px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text);
+}
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 11px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 15px; font-weight: 500; }
+.btn.primary { background: var(--azul); color: #fff; border-color: var(--azul); width: 100%; }
+.btn.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+.btn-row { display: flex; gap: 10px; margin-top: 12px; }
+
+/* ---------- cronômetro ---------- */
+.timer { text-align: center; padding: 10px 0; }
+.timer .big { font-size: 54px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+.timer .ctrls { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+.timer .ctrls .btn { min-width: 100px; }
+
+/* ---------- navegação inferior ---------- */
+.nav {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: space-around;
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+  z-index: 20;
+}
+.nav button {
+  flex: 1; border: none; background: none; color: var(--text-3);
+  font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px;
+}
+.nav button .ic { font-size: 22px; line-height: 1; }
+.nav button.on { color: var(--azul); }
+
+.empty { text-align: center; color: var(--text-3); font-size: 14px; padding: 24px 0; }
+
+/* ---------- modal ---------- */
+.modal-bg { position: fixed; inset: 0; background: rgba(10,14,20,.55); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 380px; padding: 18px 18px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+.modal h3 { font-size: 16px; margin-bottom: 4px; }
+.modal p.sub { font-size: 13px; color: var(--text-2); margin: 0 0 12px; }
+.daypick { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.daypick button { flex: 1; min-width: 40px; padding: 8px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-2); font-size: 13px; }
+.daypick button.on { background: var(--azul); color: #fff; border-color: var(--azul); font-weight: 600; }
+
+/* ===================== TABLET / PAISAGEM ===================== */
+@media (min-width: 760px) {
+  .main { padding: 24px 28px 88px; }
+  .saudacao { font-size: 26px; }
+  .tiles { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .tile .val { font-size: 28px; }
+
+  /* Home e Cronograma em duas colunas */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .grid-2 > .col { min-width: 0; }
+}
+@media (min-width: 1000px) {
+  .nav { position: sticky; }
+  .main { padding-bottom: 24px; }
+}
