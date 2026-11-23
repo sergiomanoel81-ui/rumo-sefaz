@@ -201,6 +201,25 @@ input, select {
 .daypick button { flex: 1; min-width: 40px; padding: 8px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-2); font-size: 13px; }
 .daypick button.on { background: var(--azul); color: #fff; border-color: var(--azul); font-weight: 600; }
 
+/* ícone de ajuda (ⓘ) */
+.help {
+  width: 20px; height: 20px; border-radius: 50%; padding: 0; margin-left: 6px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--azul);
+  font-size: 12px; font-weight: 700; line-height: 1; vertical-align: middle;
+  display: inline-flex; align-items: center; justify-content: center; font-style: italic;
+}
+.help:active { transform: scale(.9); }
+
+/* seletor de prioridade / opções empilhadas */
+.pick { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
+.pick button {
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); font-size: 15px; text-align: left;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.pick button.on { border-color: var(--azul); background: var(--azul-claro); color: var(--azul-forte); font-weight: 600; }
+.pick button .tag { font-size: 12px; color: var(--text-3); }
+
 /* ===================== TABLET / PAISAGEM ===================== */
 @media (min-width: 760px) {
   .main { padding: 24px 28px 88px; }

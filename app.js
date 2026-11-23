@@ -199,24 +199,24 @@
       <h1 class="saudacao">Oi, ${nome} 👋</h1>
       <div class="tiles">
         <div class="tile"><div class="lbl">Hoje</div><div class="val">${fmtMin(hojeMin)}</div></div>
-        <div class="tile"><div class="lbl">Meta</div><div class="val">${fmtMin(meta)}</div></div>
-        <div class="tile"><div class="lbl">Sequência</div><div class="val">🔥 ${streakDias()}</div></div>
+        <div class="tile"><div class="lbl">Meta ${hlp("meta")}</div><div class="val">${fmtMin(meta)}</div></div>
+        <div class="tile"><div class="lbl">Sequência ${hlp("sequencia")}</div><div class="val">🔥 ${streakDias()}</div></div>
       </div>
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <h3>Plano de hoje</h3>
+            <h3>Plano de hoje ${hlp("hoje")}</h3>
             ${avisoDescanso}
             ${tarefasHTML}
           </div>
           <div class="card">
-            <h3>Revisões de hoje <span style="color:var(--text-3);font-weight:400">(${revs.length})</span></h3>
+            <h3>Revisões de hoje <span style="color:var(--text-3);font-weight:400">(${revs.length})</span> ${hlp("revisoes")}</h3>
             ${revsHTML}
           </div>
         </div>
         <div class="col">
           <div class="card">
-            <h3>Progresso no edital — ${prog.geral}%</h3>
+            <h3>Progresso no edital — ${prog.geral}% ${hlp("progresso")}</h3>
             <div class="bar" style="margin-bottom:12px"><span style="width:${prog.geral}%"></span></div>
             ${progHTML}
           </div>
@@ -286,6 +286,7 @@
     }
 
     el("view-cronograma").innerHTML = `
+      <div class="sec-title">Modo de estudo ${hlp("modo")}</div>
       <div class="seg">
         <button data-modo="ciclo" class="${p.modo === "ciclo" ? "on" : ""}">Ciclo de Estudos</button>
         <button data-modo="semanal" class="${p.modo === "semanal" ? "on" : ""}">Cronograma Semanal</button>
@@ -293,18 +294,19 @@
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <div class="sec-title">Matérias por prioridade <button class="link" id="help-prio">?</button></div>
+            <div class="sec-title">Matérias por prioridade ${hlp("prioridade")}</div>
             ${matsHTML}
-            <p style="font-size:12px;color:var(--text-3);margin-top:10px">Toque na etiqueta para mudar a prioridade. O plano recalcula sozinho.</p>
+            <p style="font-size:12px;color:var(--text-3);margin-top:10px">👆 Toque numa matéria para escolher a prioridade. O plano recalcula sozinho.</p>
           </div>
         </div>
         <div class="col">
+          <div class="sec-title">Seu ritmo — personalize ${hlp("ritmo")}</div>
           <div class="config">
             <button class="cfg" id="cfg-horas"><div class="k">Horas/dia</div><div class="v">${fmtMin(p.horasPorDiaMin)}</div></button>
             <button class="cfg" id="cfg-dias"><div class="k">Dias</div><div class="v">${diasTxt}</div></button>
             <button class="cfg" id="cfg-top"><div class="k">Tóp/dia</div><div class="v">${p.topicosPorDia}</div></button>
           </div>
-          <div class="estimativa">🏁 No seu ritmo, cobre o edital em <strong>~${estimativaSemanas()} semanas</strong></div>
+          <div class="estimativa">🏁 No seu ritmo, cobre o edital em <strong>~${estimativaSemanas()} semanas</strong> ${hlp("estimativa")}</div>
           ${planoHTML}
         </div>
       </div>
@@ -316,35 +318,18 @@
         estado.perfil.modo = b.dataset.modo; salvar(); renderCronograma();
       })
     );
-    // mudar prioridade (cicla auto → baixa → media → alta → maxima)
+    // escolher prioridade (seletor claro)
     el("view-cronograma").querySelectorAll(".badge[data-mat]").forEach((b) =>
-      b.addEventListener("click", () => ciclarPrioridade(b.dataset.mat))
-    );
-    el("help-prio").addEventListener("click", () =>
-      abrirModal(`<h3>Prioridade das matérias</h3><p class="sub">Começa no automático, a partir do peso da matéria na última prova. Você pode fixar manualmente: cada toque na etiqueta avança Baixa → Média → Alta → Máxima → Automático. Quanto maior a prioridade, mais a matéria aparece no plano.</p><button class="btn primary" onclick="document.getElementById('modal-bg').remove()">Entendi</button>`)
+      b.addEventListener("click", () => modalPrioridade(b.dataset.mat))
     );
     // config
-    el("cfg-horas").addEventListener("click", () =>
-      modalNumero("Minutos de estudo por dia", "Usado como sua meta diária.", estado.perfil.horasPorDiaMin, 15, (v) => {
-        estado.perfil.horasPorDiaMin = v; estado.perfil.metaDiariaMin = v; salvar(); renderCronograma();
-      })
-    );
+    el("cfg-horas").addEventListener("click", modalHoras);
     el("cfg-top").addEventListener("click", () =>
       modalNumero("Tópicos por dia de estudo", "Quantos tópicos entram em cada dia do plano.", estado.perfil.topicosPorDia, 1, (v) => {
         estado.perfil.topicosPorDia = v; salvar(); renderCronograma();
       })
     );
     el("cfg-dias").addEventListener("click", editarDias);
-  }
-
-  function ciclarPrioridade(matId) {
-    const m = estado.materias.find((x) => x.id === matId);
-    if (!m) return;
-    const atual = m.prioridade; // auto, baixa, media, alta, maxima
-    const ordem = ["auto", "baixa", "media", "alta", "maxima"];
-    const i = ordem.indexOf(atual);
-    m.prioridade = ordem[(i + 1) % ordem.length];
-    salvar(); renderCronograma();
   }
 
   function editarDias() {
@@ -376,7 +361,7 @@
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <h3>Cronômetro</h3>
+            <h3>Cronômetro ${hlp("cronometro")}</h3>
             <div class="timer">
               <div class="big" id="timer-disp">00:00</div>
               <div class="ctrls">
@@ -392,7 +377,7 @@
         </div>
         <div class="col">
           <div class="card">
-            <h3>Lançamento manual</h3>
+            <h3>Lançamento manual ${hlp("manual")}</h3>
             ${selectMateriaTopico("m")}
             <label>Minutos estudados</label>
             <input type="number" id="m-min" min="0" placeholder="ex.: 40" />
@@ -562,6 +547,80 @@
       const v = +inp.value;
       if (!isNaN(v)) onSave(Math.max(min, Math.round(v)));
       fecharModal();
+    });
+  }
+
+  /* --------------------------- ajuda (ⓘ) ----------------------------------- */
+  const AJUDA = {
+    hoje: { t: "Plano de hoje", d: "São os tópicos que o app escolheu pra você estudar hoje, já priorizando as matérias que mais caem na prova. Terminou um? Toque no quadradinho ✓ pra marcar como concluído." },
+    meta: { t: "Meta do dia", d: "Quanto tempo você quer estudar por dia. Você muda isso na aba Cronograma, em \"Horas/dia\"." },
+    sequencia: { t: "Sequência 🔥", d: "Quantos dias seguidos você estudou. Estude pelo menos um pouquinho todos os dias pra não zerar a ofensiva!" },
+    progresso: { t: "Progresso no edital", d: "A porcentagem do conteúdo que você já concluiu — no total e matéria por matéria. Vai subindo conforme você marca tópicos como estudados." },
+    revisoes: { t: "Revisões", d: "Quando você conclui um tópico, o app agenda ele pra você revisar depois (em 1, 7, 15 e 30 dias). Revisar espaçado ajuda a não esquecer." },
+    modo: { t: "Ciclo x Semanal", d: "Ciclo de Estudos: uma fila que roda sem parar, ótima pra rotina imprevisível — você estuda o próximo quando dá, sem data fixa. Cronograma Semanal: organiza os tópicos em dias fixos, tipo um calendário." },
+    prioridade: { t: "Prioridade das matérias", d: "Começa automática, pelo peso de cada matéria na última prova (Legislação da BA em primeiro). Toque na matéria pra escolher você mesma: Automático, Baixa, Média, Alta ou Máxima. Quanto maior, mais ela aparece no plano." },
+    ritmo: { t: "Seu ritmo de estudo", d: "Personalize aqui: quantos minutos por dia (Horas/dia), em quais dias da semana (Dias) e quantos tópicos entram em cada dia (Tóp/dia). O plano e a estimativa recalculam na hora." },
+    estimativa: { t: "Estimativa", d: "Quanto tempo falta pra cobrir TODO o edital no seu ritmo atual. Se você aumentar as horas, os dias ou os tópicos por dia, esse prazo diminui." },
+    cronometro: { t: "Cronômetro", d: "Conta o tempo enquanto você estuda. Quando terminar, escolha a matéria e o tópico e toque em \"Salvar sessão\"." },
+    manual: { t: "Lançamento manual", d: "Estudou sem usar o cronômetro? Registre aqui os minutos e as questões que você fez. Dá pra marcar o tópico como concluído de uma vez." },
+  };
+  function hlp(chave) {
+    return `<button class="help" data-ajuda="${chave}" aria-label="O que é isso?">i</button>`;
+  }
+  function modalInfo(t, d) {
+    const bg = abrirModal(`<h3>${t}</h3><p class="sub">${d}</p><button class="btn primary" id="info-ok" style="width:100%">Entendi</button>`);
+    bg.querySelector("#info-ok").addEventListener("click", fecharModal);
+  }
+  document.body.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ajuda]");
+    if (b && AJUDA[b.dataset.ajuda]) { modalInfo(AJUDA[b.dataset.ajuda].t, AJUDA[b.dataset.ajuda].d); }
+  });
+
+  function modalPrioridade(matId) {
+    const m = estado.materias.find((x) => x.id === matId);
+    if (!m) return;
+    const auto = prioridadeAutomatica(m);
+    const opcoes = [
+      { v: "auto", nome: "Automático", tag: `sugerido: ${TIER_LABEL[auto]}` },
+      { v: "maxima", nome: "Máxima", tag: "aparece muito" },
+      { v: "alta", nome: "Alta", tag: "" },
+      { v: "media", nome: "Média", tag: "" },
+      { v: "baixa", nome: "Baixa", tag: "aparece pouco" },
+    ];
+    const botoes = opcoes.map((o) =>
+      `<button data-v="${o.v}" class="${m.prioridade === o.v ? "on" : ""}">${o.nome}${o.tag ? `<span class="tag">${o.tag}</span>` : ""}</button>`
+    ).join("");
+    const bg = abrirModal(`
+      <h3>Prioridade</h3><p class="sub">${m.nome}</p>
+      <div class="pick">${botoes}</div>
+    `);
+    bg.querySelectorAll(".pick button").forEach((b) =>
+      b.addEventListener("click", () => {
+        m.prioridade = b.dataset.v; salvar(); fecharModal(); renderCronograma();
+      })
+    );
+  }
+
+  function modalHoras() {
+    let val = estado.perfil.horasPorDiaMin;
+    const presets = [30, 60, 90, 120, 150, 180, 240];
+    const presetHTML = presets.map((p) => `<button data-min="${p}">${fmtMin(p)}</button>`).join("");
+    const bg = abrirModal(`
+      <h3>Horas de estudo por dia</h3><p class="sub">Também vira sua meta diária. Toque num valor ou ajuste nos botões.</p>
+      <div class="timer"><div class="big" id="h-disp" style="font-size:38px">${fmtMin(val)}</div>
+        <div class="ctrls"><button class="btn" id="h-menos">− 15min</button><button class="btn" id="h-mais">+ 15min</button></div>
+      </div>
+      <div class="daypick" style="margin-top:12px">${presetHTML}</div>
+      <div class="btn-row"><button class="btn" id="mod-cancel" style="flex:1">Cancelar</button><button class="btn primary" id="mod-ok" style="flex:1">Salvar</button></div>
+    `);
+    const disp = bg.querySelector("#h-disp");
+    const upd = () => { disp.textContent = fmtMin(val); };
+    bg.querySelector("#h-menos").addEventListener("click", () => { val = Math.max(15, val - 15); upd(); });
+    bg.querySelector("#h-mais").addEventListener("click", () => { val = Math.min(720, val + 15); upd(); });
+    bg.querySelectorAll(".daypick button").forEach((b) => b.addEventListener("click", () => { val = +b.dataset.min; upd(); }));
+    bg.querySelector("#mod-cancel").addEventListener("click", fecharModal);
+    bg.querySelector("#mod-ok").addEventListener("click", () => {
+      estado.perfil.horasPorDiaMin = val; estado.perfil.metaDiariaMin = val; salvar(); fecharModal(); renderCronograma();
     });
   }
 
