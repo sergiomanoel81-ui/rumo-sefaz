@@ -221,3 +221,36 @@ input, select {
   .nav { position: sticky; }
   .main { padding-bottom: 24px; }
 }
+
+/* ---------- ciclo resumo ---------- */
+.ciclo-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+.ciclo-row .nome { flex: 1; }
+.ciclo-bar { flex: 1.1; height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.ciclo-bar > span { display: block; height: 100%; background: var(--azul); border-radius: 999px; }
+.ciclo-row .ciclo-n { width: 30px; text-align: right; font-weight: 600; color: var(--azul-forte); }
+
+/* ---------- arrastar (grip) ---------- */
+.grip { touch-action: none; user-select: none; font-size: 13px; }
+.mat-row.sortable-chosen { background: var(--azul-claro); border-radius: 8px; }
+.mat-row.sortable-ghost { opacity: .35; }
+
+/* ---------- calendário / histórico ---------- */
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 16px; }
+.cal-nav { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 20px; line-height: 1; }
+.cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+.cal-dow span { text-align: center; font-size: 11px; color: var(--text-3); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell { aspect-ratio: 1; border-radius: 8px; display: flex; align-items: flex-start; justify-content: flex-end; padding: 4px 6px; font-size: 12px; color: var(--text-2); background: var(--surface-2); }
+.cal-cell.empty { background: transparent; }
+.cal-cell.d1 { background: #c9efdf; color: #0a5e43; }
+.cal-cell.d2 { background: #8fdcbd; color: #0a5e43; }
+.cal-cell.d3 { background: #45c598; color: #073d2c; }
+.cal-cell.d4 { background: #0ca678; color: #ffffff; }
+.cal-cell.today { outline: 2px solid var(--azul-forte); outline-offset: -2px; font-weight: 700; }
+.cal-cell[data-dia]:not(.d0) { cursor: pointer; }
+.cal-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: var(--text-3); }
+.cal-legend i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+.cal-legend i.d1 { background: #c9efdf; }
+.cal-legend i.d2 { background: #8fdcbd; }
+.cal-legend i.d3 { background: #45c598; }
+.cal-legend i.d4 { background: #0ca678; }

@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <div class="app">
@@ -24,6 +24,7 @@
       <section class="view" id="view-cronograma"></section>
       <section class="view" id="view-registrar"></section>
       <section class="view" id="view-revisoes"></section>
+      <section class="view" id="view-historico"></section>
     </main>
 
     <nav class="nav" id="nav">
@@ -31,10 +32,12 @@
       <button data-view="cronograma"><span class="ic">📅</span>Cronograma</button>
       <button data-view="registrar"><span class="ic">⏱️</span>Registrar</button>
       <button data-view="revisoes"><span class="ic">🔄</span>Revisões</button>
+      <button data-view="historico"><span class="ic">🗓️</span>Histórico</button>
     </nav>
   </div>
 
-  <script src="data.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="vendor/Sortable.min.js?v=4"></script>
+  <script src="data.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

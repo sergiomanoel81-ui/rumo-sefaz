@@ -28,9 +28,9 @@
   // Fila de tópicos pendentes, com rodízio ponderado pela prioridade:
   // matéria "máxima" entra 4x por ciclo, "alta" 3x, etc. (Legislação BA primeiro).
   function ordenarPendentes() {
-    const mats = [...estado.materias].sort(
-      (a, b) => pesoNum(b) - pesoNum(a) || a.ordem - b.ordem
-    );
+    // sequência segue a ordem manual das matérias; o peso (prioridade) define
+    // quantas vezes cada matéria entra por volta.
+    const mats = [...estado.materias].sort((a, b) => a.ordem - b.ordem);
     const filas = mats.map((m) => ({
       m,
       w: pesoNum(m),
@@ -57,16 +57,12 @@
     return out;
   }
 
-  function cicloSequencia() {
-    // Uma volta do ciclo, no nível de matéria (com repetição por peso).
-    const mats = [...estado.materias]
+  function cicloResumo() {
+    // Em uma volta do ciclo: cada matéria pendente aparece pesoNum(m) vezes.
+    return [...estado.materias]
       .filter((m) => m.topicos.some((t) => t.status !== "concluido"))
-      .sort((a, b) => pesoNum(b) - pesoNum(a) || a.ordem - b.ordem);
-    const seq = [];
-    mats.forEach((m) => {
-      for (let k = 0; k < pesoNum(m); k++) seq.push(m);
-    });
-    return seq;
+      .sort((a, b) => a.ordem - b.ordem)
+      .map((m) => ({ nome: m.nome, n: pesoNum(m) }));
   }
 
   function planoProximosDias(qtdDias) {
@@ -87,6 +83,39 @@
       iso = S.addDiasISO(iso, 1);
     }
     return resultado;
+  }
+
+  // Dia que o "Plano de hoje" representa: hoje, se for dia de estudo; senão o próximo.
+  function diaDoPlano() {
+    let iso = S.hojeISO();
+    const dias = estado.perfil.diasEstudo;
+    let seg = 0;
+    while (!dias.includes(new Date(iso + "T00:00:00").getDay()) && seg++ < 14) {
+      iso = S.addDiasISO(iso, 1);
+    }
+    return iso;
+  }
+  // Plano fixo do dia: uma vez montado, não troca de tópicos durante o dia —
+  // os concluídos continuam aparecendo marcados. Troca só quando vira o dia.
+  function planoDeHoje() {
+    const dia = diaDoPlano();
+    const pd = estado.perfil.planoDia;
+    let ids;
+    if (pd && pd.data === dia && Array.isArray(pd.ids) && pd.ids.length) {
+      ids = pd.ids;
+    } else {
+      ids = ordenarPendentes().slice(0, Math.max(1, estado.perfil.topicosPorDia)).map((x) => x.top.id);
+      estado.perfil.planoDia = { data: dia, ids };
+      salvar();
+    }
+    const itens = [];
+    ids.forEach((id) => {
+      for (const m of estado.materias) {
+        const t = m.topicos.find((x) => x.id === id);
+        if (t) { itens.push({ mat: m, top: t }); break; }
+      }
+    });
+    return { dia, itens };
   }
 
   function estimativaSemanas() {
@@ -165,12 +194,13 @@
     const hojeMin = minutosDoDia(S.hojeISO());
     const prog = progresso();
     const revs = revisoesPendentes();
-    const plano = planoProximosDias(1)[0];
-    const ehHojeEstudo = estado.perfil.diasEstudo.includes(new Date().getDay());
+    const { dia, itens } = planoDeHoje();
+    const ehHojeEstudo = dia === S.hojeISO();
+    const feitos = itens.filter((it) => it.top.status === "concluido").length;
 
-    const tarefasHTML = plano && plano.itens.length
-      ? plano.itens.map((it) => `
-          <div class="task" data-top="${it.top.id}" data-mat="${it.mat.id}">
+    const tarefasHTML = itens.length
+      ? itens.map((it) => `
+          <div class="task ${it.top.status === "concluido" ? "done" : ""}" data-top="${it.top.id}">
             <button class="box">✓</button>
             <div class="txt"><div class="mat">${it.mat.nome}</div>${it.top.nome}</div>
           </div>`).join("")
@@ -205,7 +235,7 @@
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <h3>Plano de hoje ${hlp("hoje")}</h3>
+            <h3>Plano de hoje <span style="color:var(--text-3);font-weight:400">(${feitos}/${itens.length})</span> ${hlp("hoje")}</h3>
             ${avisoDescanso}
             ${tarefasHTML}
           </div>
@@ -224,26 +254,31 @@
       </div>
     `;
 
-    // marcar tarefa como concluída
+    // marcar / desmarcar tarefa (o check fica marcado no dia)
     el("view-hoje").querySelectorAll(".task[data-top]").forEach((node) => {
       node.querySelector(".box").addEventListener("click", () => {
-        concluirTopico(node.dataset.top);
+        toggleTopicoPlano(node.dataset.top);
       });
     });
   }
 
-  function concluirTopico(topId) {
+  function toggleTopicoPlano(topId) {
     for (const m of estado.materias) {
       const t = m.topicos.find((x) => x.id === topId);
-      if (t && t.status !== "concluido") {
+      if (!t) continue;
+      if (t.status === "concluido") {
+        // desmarcar: volta a pendente e remove as revisões ainda não feitas desse tópico
+        t.status = "estudando";
+        t.estudadoEm = null;
+        estado.revisoes = estado.revisoes.filter((r) => !(r.topicoId === topId && !r.feito));
+      } else {
         t.status = "concluido";
         t.estudadoEm = S.hojeISO();
         agendarRevisoes(t.id, m.id);
-        // registra uma sessão curta para contar atividade do dia (se nenhuma hoje)
-        salvar();
-        renderHoje();
-        return;
       }
+      salvar();
+      renderHoje();
+      return;
     }
   }
 
@@ -251,13 +286,13 @@
   function renderCronograma() {
     const p = estado.perfil;
     const matsHTML = [...estado.materias]
-      .sort((a, b) => pesoNum(b) - pesoNum(a) || a.ordem - b.ordem)
+      .sort((a, b) => a.ordem - b.ordem)
       .map((m) => {
         const tier = prioridadeEfetiva(m);
         const auto = m.prioridade === "auto" ? " · auto" : "";
         return `
-          <div class="mat-row">
-            <span class="grip">⋮⋮</span>
+          <div class="mat-row" data-mid="${m.id}">
+            <span class="grip" title="Arraste para reordenar">⣿</span>
             <span class="nome">${m.nome}</span>
             <span class="peso">${m.pesoQ}q${auto}</span>
             <button class="badge ${tier}" data-mat="${m.id}">${TIER_LABEL[tier]}</button>
@@ -269,11 +304,18 @@
 
     let planoHTML = "";
     if (p.modo === "ciclo") {
-      const seq = cicloSequencia();
-      const chips = seq.length
-        ? seq.map((m) => `<span class="chip" style="margin:3px">${m.nome.split(" ")[0]}…</span>`).join("")
-        : `<div class="empty">Edital concluído 🎉</div>`;
-      planoHTML = `<div class="card"><h3>Ciclo sugerido (uma volta)</h3><div style="display:flex;flex-wrap:wrap">${chips}</div></div>`;
+      const resumo = cicloResumo();
+      const maxN = 4;
+      planoHTML = `<div class="card">
+        <h3>Em cada volta do ciclo</h3>
+        <p style="font-size:12px;color:var(--text-3);margin:0 0 12px">Quanto maior a prioridade, mais blocos a matéria recebe por volta.</p>
+        ${resumo.length ? resumo.map((r) => `
+          <div class="ciclo-row">
+            <span class="nome">${r.nome}</span>
+            <span class="ciclo-bar"><span style="width:${Math.round(r.n / maxN * 100)}%"></span></span>
+            <span class="ciclo-n">${r.n}×</span>
+          </div>`).join("") : '<div class="empty">Edital concluído 🎉</div>'}
+      </div>`;
     } else {
       const dias = planoProximosDias(6);
       planoHTML = `<div class="card"><h3>Próximos dias</h3>${
@@ -295,8 +337,8 @@
         <div class="col">
           <div class="card">
             <div class="sec-title">Matérias por prioridade ${hlp("prioridade")}</div>
-            ${matsHTML}
-            <p style="font-size:12px;color:var(--text-3);margin-top:10px">👆 Toque numa matéria para escolher a prioridade. O plano recalcula sozinho.</p>
+            <div id="mat-list">${matsHTML}</div>
+            <p style="font-size:12px;color:var(--text-3);margin-top:10px">👆 Toque na etiqueta para a prioridade · arraste pelo ⣿ para reordenar.</p>
           </div>
         </div>
         <div class="col">
@@ -330,6 +372,23 @@
       })
     );
     el("cfg-dias").addEventListener("click", editarDias);
+
+    // arrastar para reordenar (SortableJS)
+    const lista = el("mat-list");
+    if (window.Sortable && lista) {
+      window.Sortable.create(lista, {
+        handle: ".grip",
+        animation: 150,
+        onEnd: () => {
+          const ids = [...lista.querySelectorAll(".mat-row")].map((r) => r.dataset.mid);
+          ids.forEach((id, i) => {
+            const m = estado.materias.find((x) => x.id === id);
+            if (m) m.ordem = i;
+          });
+          salvar(); renderCronograma();
+        },
+      });
+    }
   }
 
   function editarDias() {
@@ -507,6 +566,92 @@
     });
   }
 
+  /* ============================ TELA: HISTÓRICO ========================== */
+  let histMes = null; // ISO do 1º dia do mês exibido
+  const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+  function intensidade(min) {
+    if (min <= 0) return 0;
+    if (min <= 30) return 1;
+    if (min <= 60) return 2;
+    if (min <= 120) return 3;
+    return 4;
+  }
+  function melhorSequencia() {
+    const dias = [...new Set(estado.sessoes.filter((s) => (s.minutos || 0) > 0).map((s) => s.data))].sort();
+    let best = 0, cur = 0, prev = null;
+    for (const d of dias) {
+      cur = (prev && S.addDiasISO(prev, 1) === d) ? cur + 1 : 1;
+      best = Math.max(best, cur); prev = d;
+    }
+    return best;
+  }
+  function isoMesDelta(iso, delta) {
+    let y = parseInt(iso.slice(0, 4)), m = parseInt(iso.slice(5, 7)) + delta;
+    while (m < 1) { m += 12; y--; }
+    while (m > 12) { m -= 12; y++; }
+    return `${y}-${String(m).padStart(2, "0")}-01`;
+  }
+  function verDia(iso) {
+    const ss = estado.sessoes.filter((s) => s.data === iso);
+    const titulo = `${iso.slice(8)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+    if (!ss.length) { modalInfo(titulo, "Nenhum estudo registrado neste dia."); return; }
+    const total = ss.reduce((a, s) => a + (s.minutos || 0), 0);
+    const linhas = ss.map((s) => {
+      const n = nomeTopico(s.topicoId);
+      const q = s.questoes ? ` · ${s.acertos || 0}/${s.questoes}` : "";
+      return `<div class="task"><div class="txt"><div class="mat">${n.mat}</div>${n.top}</div><span class="meta">${fmtMin(s.minutos || 0)}${q}</span></div>`;
+    }).join("");
+    const bg = abrirModal(`<h3>${titulo}</h3><p class="sub">${fmtMin(total)} estudados</p>${linhas}<button class="btn primary" id="info-ok" style="width:100%;margin-top:10px">Fechar</button>`);
+    bg.querySelector("#info-ok").addEventListener("click", fecharModal);
+  }
+  function renderHistorico() {
+    if (!histMes) histMes = S.hojeISO().slice(0, 8) + "01";
+    const y = parseInt(histMes.slice(0, 4)), mo = parseInt(histMes.slice(5, 7));
+    const offset = new Date(y, mo - 1, 1).getDay();
+    const diasNoMes = new Date(y, mo, 0).getDate();
+
+    let cells = "";
+    for (let i = 0; i < offset; i++) cells += `<div class="cal-cell empty"></div>`;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const iso = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const min = minutosDoDia(iso);
+      const hoje = iso === S.hojeISO() ? " today" : "";
+      cells += `<div class="cal-cell d${intensidade(min)}${hoje}" data-dia="${iso}"><span>${d}</span></div>`;
+    }
+
+    const totalMin = estado.sessoes.reduce((a, s) => a + (s.minutos || 0), 0);
+    const diasEstudados = new Set(estado.sessoes.filter((s) => (s.minutos || 0) > 0).map((s) => s.data)).size;
+    const totalQ = estado.sessoes.reduce((a, s) => a + (s.questoes || 0), 0);
+    const totalA = estado.sessoes.reduce((a, s) => a + (s.acertos || 0), 0);
+    const pctAc = totalQ ? Math.round(totalA / totalQ * 100) : 0;
+
+    el("view-historico").innerHTML = `
+      <div class="tiles" style="grid-template-columns:repeat(4,1fr)">
+        <div class="tile"><div class="lbl">Total</div><div class="val">${fmtMin(totalMin)}</div></div>
+        <div class="tile"><div class="lbl">Dias</div><div class="val">${diasEstudados}</div></div>
+        <div class="tile"><div class="lbl">Melhor seq.</div><div class="val">🔥 ${melhorSequencia()}</div></div>
+        <div class="tile"><div class="lbl">Acertos</div><div class="val">${pctAc}<small>%</small></div></div>
+      </div>
+      <div class="card">
+        <div class="cal-head">
+          <button class="cal-nav" id="cal-prev" aria-label="Mês anterior">‹</button>
+          <strong>${MESES[mo - 1]} ${y}</strong>
+          <button class="cal-nav" id="cal-next" aria-label="Próximo mês">›</button>
+        </div>
+        <div class="cal-dow">${["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<span>${x}</span>`).join("")}</div>
+        <div class="cal-grid">${cells}</div>
+        <div class="cal-legend"><span>menos</span><i class="d1"></i><i class="d2"></i><i class="d3"></i><i class="d4"></i><span>mais</span></div>
+        <p style="font-size:12px;color:var(--text-3);margin-top:10px">Toque num dia para ver o que você estudou.</p>
+      </div>
+    `;
+    el("cal-prev").addEventListener("click", () => { histMes = isoMesDelta(histMes, -1); renderHistorico(); });
+    el("cal-next").addEventListener("click", () => { histMes = isoMesDelta(histMes, 1); renderHistorico(); });
+    el("view-historico").querySelectorAll(".cal-cell[data-dia]").forEach((c) =>
+      c.addEventListener("click", () => verDia(c.dataset.dia))
+    );
+  }
+
   /* --------------------------- toast simples ------------------------------- */
   function toast(msg) {
     let t = document.getElementById("toast");
@@ -625,7 +770,7 @@
   }
 
   /* --------------------------- roteador ------------------------------------ */
-  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, registrar: renderRegistrar, revisoes: renderRevisoes };
+  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico };
   function irPara(view) {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     el("view-" + view).classList.add("active");

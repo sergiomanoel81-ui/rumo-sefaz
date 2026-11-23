@@ -27,6 +27,7 @@ const SEED = {
     modo: "ciclo", // "ciclo" | "semanal"
     lembreteEstudo: "19:00",
     notificacoes: false,
+    planoDia: null, // { data: ISO, ids: [topicoId...] } — plano fixo do dia
   },
   materias: [
     {
