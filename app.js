@@ -41,6 +41,9 @@
     if (mudou) S.salvarEstado(estado);
   }
   migrarConteudo();
+  // v8: respostas da aba Questões e fila de questões erradas
+  if (!Array.isArray(estado.respostas)) estado.respostas = []; // {d, m, f, ok}
+  if (!Array.isArray(estado.qErradas)) estado.qErradas = []; // ids de questões
 
   /* --------------------------- helpers de prioridade ----------------------- */
   const DIAS_NOME = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -199,6 +202,42 @@
     const h = Math.floor(min / 60), m = min % 60;
     return h > 0 ? `${h}h${m > 0 ? String(m).padStart(2, "0") : ""}` : `${m}min`;
   }
+  // escapa texto vindo de fora (questões) antes de pôr no HTML
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function minutosUltimosDias(n) {
+    let tot = 0;
+    for (let i = 0; i < n; i++) tot += minutosDoDia(S.addDiasISO(S.hojeISO(), -i));
+    return tot;
+  }
+  function inicioSemana(iso) { // segunda-feira da semana de iso
+    const dow = new Date(iso + "T00:00:00").getDay();
+    return S.addDiasISO(iso, -((dow + 6) % 7));
+  }
+  function nomeMateriaPorId(id) {
+    const m = estado.materias.find((x) => x.id === id);
+    return m ? m.nome : "";
+  }
+  // acertos juntando lançamentos manuais (sessões) e respostas da aba Questões
+  function acertosPorMateria() {
+    const por = {};
+    const soma = (nome, q, a) => {
+      if (!nome || !q) return;
+      por[nome] = por[nome] || { q: 0, a: 0 };
+      por[nome].q += q; por[nome].a += a;
+    };
+    estado.sessoes.forEach((s) => soma(nomeMateriaPorId(s.materiaId), s.questoes || 0, s.acertos || 0));
+    estado.respostas.forEach((r) => soma(r.m, 1, r.ok ? 1 : 0));
+    return por;
+  }
+  function acertosGeral() {
+    let q = 0, a = 0;
+    Object.values(acertosPorMateria()).forEach((x) => { q += x.q; a += x.a; });
+    return { q, a, pct: q ? Math.round((a / q) * 100) : null };
+  }
 
   /* --------------------------- revisões ------------------------------------ */
   function agendarRevisoes(topicoId, materiaId) {
@@ -232,69 +271,124 @@
 
   /* ============================ TELA: HOJE ================================= */
   function renderHoje() {
-    const nome = estado.perfil.nome ? estado.perfil.nome : "estudante";
+    const nome = esc(estado.perfil.nome || "estudante");
+    const hoje = S.hojeISO();
     const meta = estado.perfil.metaDiariaMin;
-    const hojeMin = minutosDoDia(S.hojeISO());
+    const hojeMin = minutosDoDia(hoje);
+    const media7 = Math.round(minutosUltimosDias(7) / 7);
+    const ac = acertosGeral();
     const prog = progresso();
     const revs = revisoesPendentes();
     const { dia, itens } = planoDeHoje();
-    const ehHojeEstudo = dia === S.hojeISO();
+    const ehHojeEstudo = dia === hoje;
     const feitos = itens.filter((it) => it.top.status === "concluido").length;
 
     const tarefasHTML = itens.length
       ? itens.map((it) => `
           <div class="task ${it.top.status === "concluido" ? "done" : ""}" data-top="${it.top.id}">
-            <button class="box">✓</button>
-            <div class="txt"><div class="mat">${it.mat.nome}</div>${it.top.nome}</div>
+            <button class="box" aria-label="Marcar tópico">✓</button>
+            <div class="txt"><span class="mat">${esc(it.mat.nome)}</span>${esc(it.top.nome)}</div>
           </div>`).join("")
-      : `<div class="empty">Tudo em dia por aqui 🎉</div>`;
-
+      : `<div class="empty">Tudo em dia por aqui! 🎉</div>`;
     const avisoDescanso = ehHojeEstudo ? "" :
-      `<p style="font-size:13px;color:var(--text-3);margin:0 0 8px">Hoje não é dia de estudo no seu plano. Abaixo, o próximo dia:</p>`;
+      `<p style="font-size:14px;color:var(--text-3);margin:0 0 6px">Hoje é folga no seu plano. Este é o próximo dia de estudo:</p>`;
 
-    const progHTML = prog.porMateria
-      .filter((p) => p.pct > 0 || true).slice(0, 5)
-      .map((p) => `
+    // constância: 4 semanas alinhadas por dia da semana (domingo a sábado)
+    const domingoAtual = S.addDiasISO(hoje, -new Date(hoje + "T00:00:00").getDay());
+    let heat = "";
+    for (let i = 0; i < 28; i++) {
+      const iso = S.addDiasISO(domingoAtual, i - 21);
+      if (iso > hoje) { heat += `<span style="visibility:hidden"></span>`; continue; }
+      const lvl = intensidade(minutosDoDia(iso));
+      heat += `<span class="${lvl ? "h" + lvl : ""}${iso === hoje ? " hoje" : ""}" title="${iso.slice(8)}/${iso.slice(5, 7)}"></span>`;
+    }
+    const ini = inicioSemana(hoje);
+    let semanaMin = 0;
+    for (let iso = ini; iso <= hoje; iso = S.addDiasISO(iso, 1)) semanaMin += minutosDoDia(iso);
+    const metaSemana = Math.max(1, meta * estado.perfil.diasEstudo.length);
+    const pctSemana = Math.min(100, Math.round((semanaMin / metaSemana) * 100));
+
+    // últimos 7 dias
+    const dias7 = [];
+    for (let i = 6; i >= 0; i--) {
+      const iso = S.addDiasISO(hoje, -i);
+      dias7.push({ iso, min: minutosDoDia(iso), dow: new Date(iso + "T00:00:00").getDay() });
+    }
+    const maxMin = Math.max(meta, ...dias7.map((d) => d.min), 1);
+    const semanaHTML = dias7.map((d) => `
+      <div class="col${d.iso === hoje ? " hoje" : ""}" title="${fmtMin(d.min)}">
+        <div class="bar-v" style="height:${Math.max(4, Math.round((d.min / maxMin) * 100))}%"></div>
+        <span>${"DSTQQSS"[d.dow]}</span>
+      </div>`).join("");
+
+    // acertos por matéria
+    const porMat = Object.entries(acertosPorMateria()).sort((a, b) => b[1].q - a[1].q).slice(0, 5);
+    const acertosHTML = porMat.length
+      ? porMat.map(([n, x]) => `
+          <div class="ac-row"><span>${esc(n)}</span><span><span class="n">${x.a}/${x.q}</span> <span class="pct">${Math.round((x.a / x.q) * 100)}%</span></span></div>`).join("")
+      : `<div class="empty" style="font-size:16px">Responda questões na aba ✏️ Questões pra ver aqui.</div>`;
+
+    const revsHTML = revs.length
+      ? revs.slice(0, 4).map((r) => {
+          const n = nomeTopico(r.topicoId);
+          return `<div class="task"><div class="txt"><span class="mat">${esc(n.mat)}</span>${esc(n.top)}</div></div>`;
+        }).join("")
+      : `<div class="empty" style="font-size:16px">Sem revisões pra hoje.</div>`;
+    const erradasHTML = estado.qErradas.length
+      ? `<button class="btn" id="dash-erradas" style="width:100%;margin-top:10px">✏️ Refazer ${estado.qErradas.length} ${estado.qErradas.length === 1 ? "questão errada" : "questões erradas"}</button>`
+      : "";
+
+    const progHTML = prog.porMateria.map((p) => `
         <div class="row-prog">
-          <span class="nome">${p.nome}</span>
+          <span class="nome">${esc(p.nome)}</span>
           <span class="bar"><span style="width:${p.pct}%"></span></span>
           <span class="pct">${p.pct}%</span>
         </div>`).join("");
 
-    const revsHTML = revs.length
-      ? revs.slice(0, 5).map((r) => {
-          const n = nomeTopico(r.topicoId);
-          return `<div class="task"><div class="txt"><div class="mat">${n.mat}</div>${n.top}</div><span class="meta">revisar</span></div>`;
-        }).join("")
-      : `<div class="empty">Sem revisões para hoje</div>`;
-
     el("view-hoje").innerHTML = `
-      <h1 class="saudacao">Oi, ${nome} 👋</h1>
-      <div class="tiles">
-        <div class="tile"><div class="lbl">Hoje</div><div class="val">${fmtMin(hojeMin)}</div></div>
-        <div class="tile"><div class="lbl">Meta ${hlp("meta")}</div><div class="val">${fmtMin(meta)}</div></div>
-        <div class="tile"><div class="lbl">Sequência ${hlp("sequencia")}</div><div class="val">🔥 ${streakDias()}</div></div>
+      <div class="dash-head">
+        <h1 class="saudacao">Oi, ${nome}!</h1>
       </div>
-      <div class="grid-2">
-        <div class="col">
-          <div class="card">
-            <h3>Plano recomendado de hoje <span style="color:var(--text-3);font-weight:400">(${feitos}/${itens.length})</span> ${hlp("hoje")}</h3>
-            <p style="font-size:12px;color:var(--text-3);margin:0 0 8px">Escolhido automaticamente pelo seu cronograma, com as matérias que mais pesam na prova.</p>
-            ${avisoDescanso}
-            ${tarefasHTML}
-          </div>
-          <div class="card">
-            <h3>Revisões de hoje <span style="color:var(--text-3);font-weight:400">(${revs.length})</span> ${hlp("revisoes")}</h3>
-            ${revsHTML}
-          </div>
+      <div class="tiles">
+        <div class="tile"><div class="lbl">hoje</div><div class="val">${fmtMin(hojeMin)}</div></div>
+        <div class="tile"><div class="lbl">média 7 dias ${hlp("media")}</div><div class="val">${fmtMin(media7)}</div></div>
+        <div class="tile"><div class="lbl">acertos ${hlp("acertos")}</div><div class="val">${ac.pct == null ? "—" : ac.pct + "<small>%</small>"}</div></div>
+        <div class="tile"><div class="lbl">edital ${hlp("progresso")}</div><div class="val">${prog.geral}<small>%</small></div></div>
+      </div>
+      <div class="dash-grid">
+        <div class="card">
+          <h3>Plano recomendado de hoje <span style="font-family:var(--f-hand);font-size:17px;color:var(--text-2)">(${feitos}/${itens.length})</span> ${hlp("hoje")}</h3>
+          ${avisoDescanso}
+          ${tarefasHTML}
         </div>
-        <div class="col">
-          <div class="card">
-            <h3>Progresso no edital — ${prog.geral}% ${hlp("progresso")}</h3>
-            <div class="bar" style="margin-bottom:12px"><span style="width:${prog.geral}%"></span></div>
-            ${progHTML}
-          </div>
+        <div class="card">
+          <h3>Constância ${hlp("sequencia")}</h3>
+          <div class="heat-dow">${["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<span>${x}</span>`).join("")}</div>
+          <div class="heat">${heat}</div>
+          <div class="meta-lbl">🔥 ${streakDias()} ${streakDias() === 1 ? "dia seguido" : "dias seguidos"}</div>
+          <div class="meta-lbl">meta da semana · ${fmtMin(semanaMin)} de ${fmtMin(metaSemana)}</div>
+          <div class="bar"><span style="width:${pctSemana}%"></span></div>
         </div>
+      </div>
+      <div class="dash-row3">
+        <div class="card">
+          <h3>Revisões de hoje ${hlp("revisoes")}</h3>
+          ${revsHTML}
+          ${erradasHTML}
+        </div>
+        <div class="card">
+          <h3>Últimos 7 dias</h3>
+          <div class="week">${semanaHTML}</div>
+          <div class="meta-lbl" style="margin-top:8px">total: ${fmtMin(minutosUltimosDias(7))}</div>
+        </div>
+        <div class="card">
+          <h3>Acertos por matéria</h3>
+          ${acertosHTML}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Progresso no edital · ${prog.geral}% ${hlp("progresso")}</h3>
+        ${progHTML}
       </div>
     `;
 
@@ -304,6 +398,8 @@
         toggleTopicoPlano(node.dataset.top);
       });
     });
+    const be = el("dash-erradas");
+    if (be) be.addEventListener("click", () => { irPara("questoes"); iniciarSessaoQuestoes(true); });
   }
 
   function toggleTopicoPlano(topId) {
@@ -459,7 +555,6 @@
   }
 
   /* ============================ TELA: REGISTRAR =========================== */
-  let timerSeg = 0, timerInt = null;
   function renderRegistrar() {
     el("view-registrar").innerHTML = `
       <div class="grid-2">
@@ -500,10 +595,10 @@
     ligarSelectMateriaTopico("t");
     ligarSelectMateriaTopico("m");
 
-    // cronômetro
+    // cronômetro (o mesmo do botão flutuante; continua rodando entre telas)
     atualizaTimer();
     el("t-start").addEventListener("click", toggleTimer);
-    el("t-zero").addEventListener("click", () => { pausaTimer(); timerSeg = 0; atualizaTimer(); el("t-salvar").style.display = "none"; });
+    el("t-zero").addEventListener("click", zerarTimer);
     el("t-save").addEventListener("click", salvarSessaoTimer);
 
     // manual
@@ -530,30 +625,54 @@
     popularTopicos();
   }
 
-  function atualizaTimer() {
-    const mm = String(Math.floor(timerSeg / 60)).padStart(2, "0");
-    const ss = String(timerSeg % 60).padStart(2, "0");
-    const d = el("timer-disp"); if (d) d.textContent = `${mm}:${ss}`;
+  // Cronômetro baseado em horário (não em contagem), salvo no estado:
+  // sobrevive a troca de tela, app em segundo plano e recarregar a página.
+  let timerTick = null;
+  function timerObj() {
+    if (!estado.perfil.timer) estado.perfil.timer = { inicio: null, acum: 0 };
+    return estado.perfil.timer;
   }
-  function toggleTimer() {
-    if (timerInt) pausaTimer(); else iniciaTimer();
+  function timerRodando() { return !!timerObj().inicio; }
+  function timerSegs() {
+    const t = timerObj();
+    return Math.max(0, Math.floor(t.acum + (t.inicio ? (Date.now() - t.inicio) / 1000 : 0)));
+  }
+  function garantirTick() {
+    if (timerRodando() && !timerTick) timerTick = setInterval(atualizaTimer, 1000);
+    if (!timerRodando() && timerTick) { clearInterval(timerTick); timerTick = null; }
+  }
+  function atualizaTimer() {
+    const s = timerSegs();
+    const h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    const txt = (h ? `${h}:${String(mm).padStart(2, "0")}` : String(mm).padStart(2, "0")) + ":" + String(ss).padStart(2, "0");
+    const d = el("timer-disp"); if (d) d.textContent = txt;
+    const ft = el("float-timer"); if (ft) ft.classList.toggle("rodando", timerRodando());
+    const ftt = el("ft-txt"); if (ftt) ftt.textContent = (timerRodando() || s > 0) ? txt : "";
+    const b = el("t-start"); if (b) b.textContent = timerRodando() ? "Pausar" : (s > 0 ? "Continuar" : "Iniciar");
+    const sv = el("t-salvar"); if (sv) sv.style.display = s > 0 ? "block" : "none";
   }
   function iniciaTimer() {
-    timerInt = setInterval(() => { timerSeg++; atualizaTimer(); }, 1000);
-    const b = el("t-start"); if (b) b.textContent = "Pausar";
-    const sv = el("t-salvar"); if (sv) sv.style.display = "block";
+    const t = timerObj();
+    if (!t.inicio) { t.inicio = Date.now(); salvar(); }
+    garantirTick(); atualizaTimer();
   }
   function pausaTimer() {
-    if (timerInt) { clearInterval(timerInt); timerInt = null; }
-    const b = el("t-start"); if (b) b.textContent = "Continuar";
+    const t = timerObj();
+    if (t.inicio) { t.acum += (Date.now() - t.inicio) / 1000; t.inicio = null; salvar(); }
+    garantirTick(); atualizaTimer();
   }
+  function zerarTimer() {
+    const t = timerObj();
+    t.inicio = null; t.acum = 0; salvar();
+    garantirTick(); atualizaTimer();
+  }
+  function toggleTimer() { if (timerRodando()) pausaTimer(); else iniciaTimer(); }
   function salvarSessaoTimer() {
     pausaTimer();
-    const min = Math.round(timerSeg / 60);
+    const min = Math.round(timerSegs() / 60);
     if (min <= 0) { toast("Estude ao menos 1 minuto antes de salvar."); return; }
     registrarSessao(el("t-mat").value, el("t-top").value, min, 0, 0, false);
-    timerSeg = 0; atualizaTimer(); el("t-salvar").style.display = "none";
-    const b = el("t-start"); if (b) b.textContent = "Iniciar";
+    zerarTimer();
     toast(`Sessão de ${min}min salva!`);
   }
   function salvarManual() {
@@ -574,6 +693,223 @@
       else if (t.status === "novo") t.status = "estudando";
     }
     salvar();
+  }
+
+  /* ============================ TELA: QUESTÕES =========================== */
+  // Dois bancos: Cesgranrio (múltipla escolha, provas reais) e Lei Seca
+  // (certo/errado: texto original da lei = CERTO; pegadinha = ERRADO).
+  let QBANCO = null, qCarregando = null, qSessao = null, qErro = false;
+  const Q_POR_SESSAO = 10;
+  function carregarQuestoes() {
+    if (QBANCO) return Promise.resolve(QBANCO);
+    if (!qCarregando) {
+      qCarregando = Promise.all([
+        fetch("questoes/cesgranrio.json?v=8").then((r) => r.json()),
+        fetch("questoes/leiseca.json?v=8").then((r) => r.json()),
+      ]).then(([c, l]) => {
+        QBANCO = { cesg: c.questoes || [], lei: l.questoes || [] };
+        qErro = false;
+        return QBANCO;
+      }).catch((e) => { qErro = true; qCarregando = null; throw e; });
+    }
+    return qCarregando;
+  }
+  function qCfg() {
+    if (!estado.perfil.qCfg) estado.perfil.qCfg = { fonte: "cesg", materia: "todas" };
+    return estado.perfil.qCfg;
+  }
+  function embaralhar(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function prepararItem(q) {
+    if (q.a) { // Cesgranrio: a primeira alternativa é a correta
+      return { tipo: "mc", id: q.id, m: q.m, p: q.p, e: q.e, alts: embaralhar(q.a.map((t, i) => ({ t, certa: i === 0 }))) };
+    }
+    const usarPegadinha = q.v && q.v.length && Math.random() < 0.55;
+    const v = usarPegadinha ? q.v[Math.floor(Math.random() * q.v.length)] : null;
+    return { tipo: "ce", id: q.id, m: q.m, l: q.l, r: q.r, o: q.o, afirm: v ? v.t : q.o, certo: !v, expl: v ? v.e : "" };
+  }
+  function iniciarSessaoQuestoes(soErradas) {
+    return carregarQuestoes().then((B) => {
+      const cfg = qCfg();
+      let pool;
+      if (soErradas) {
+        const set = new Set(estado.qErradas);
+        pool = [...B.cesg, ...B.lei].filter((q) => set.has(q.id));
+      } else {
+        pool = cfg.fonte === "lei" ? B.lei : B.cesg;
+        if (cfg.materia !== "todas") pool = pool.filter((q) => q.m === cfg.materia);
+      }
+      if (!pool.length) { toast("Não há questões pra essa escolha."); qSessao = null; renderQuestoes(); return; }
+      qSessao = { itens: embaralhar(pool).slice(0, Q_POR_SESSAO).map(prepararItem), i: 0, acertos: 0, resp: null, fim: false, erradas: !!soErradas };
+      renderQuestoes();
+    }).catch(() => { renderQuestoes(); });
+  }
+  function fmtEnun(txt) {
+    let h = esc(txt);
+    h = h.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (_, c) => `<pre>${c.replace(/\n/g, "&#10;")}</pre>`);
+    h = h.replace(/`([^`]+)`/g, '<span class="fonte-txt">$1</span>');
+    h = h.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+    return h.replace(/\n/g, "<br>");
+  }
+  function registrarResposta(item, ok) {
+    estado.respostas.push({ d: S.hojeISO(), m: item.m, f: item.tipo === "mc" ? "cesg" : "lei", ok });
+    const i = estado.qErradas.indexOf(item.id);
+    if (!ok && i < 0) estado.qErradas.push(item.id);
+    if (ok && i >= 0) estado.qErradas.splice(i, 1);
+    salvar();
+  }
+  function responder(valor) {
+    const s = qSessao;
+    if (!s || s.resp !== null) return;
+    const it = s.itens[s.i];
+    const ok = it.tipo === "mc" ? !!it.alts[valor].certa : (valor === "certo") === it.certo;
+    s.resp = valor;
+    if (ok) s.acertos++;
+    registrarResposta(it, ok);
+    renderQuestoes();
+  }
+  function proximaQuestao() {
+    const s = qSessao;
+    if (!s) return;
+    if (s.i + 1 >= s.itens.length) s.fim = true;
+    else { s.i++; s.resp = null; }
+    renderQuestoes();
+  }
+
+  function renderQuestoes() {
+    const v = el("view-questoes");
+    if (!QBANCO) {
+      v.innerHTML = qErro
+        ? `<div class="card"><div class="empty">Não consegui carregar as questões. Verifique a conexão e toque de novo na aba.</div></div>`
+        : `<div class="card"><div class="empty">Abrindo o banco de questões…</div></div>`;
+      if (!qErro) carregarQuestoes().then(renderQuestoes).catch(renderQuestoes);
+      else { qErro = false; }
+      return;
+    }
+    if (qSessao && qSessao.fim) return renderResultadoQ(v);
+    if (qSessao) return renderQuestaoAtual(v);
+    renderSetupQ(v);
+  }
+
+  function renderSetupQ(v) {
+    const cfg = qCfg();
+    const banco = cfg.fonte === "lei" ? QBANCO.lei : QBANCO.cesg;
+    const cont = {};
+    banco.forEach((q) => { cont[q.m] = (cont[q.m] || 0) + 1; });
+    if (cfg.materia !== "todas" && !cont[cfg.materia]) cfg.materia = "todas";
+    const chips = [`<button class="q-chip ${cfg.materia === "todas" ? "on" : ""}" data-m="todas">Todas <small>(${banco.length})</small></button>`]
+      .concat(Object.keys(cont).sort().map((m) => `<button class="q-chip ${cfg.materia === m ? "on" : ""}" data-m="${esc(m)}">${esc(m)} <small>(${cont[m]})</small></button>`))
+      .join("");
+    v.innerHTML = `
+      <div class="q-wrap">
+        <div class="banner">✏️ Escolha o tipo de questão e a matéria. Suas respostas entram nos <strong>acertos</strong> do painel, e as erradas ficam guardadas pra você refazer.</div>
+        <div class="sec-title">Tipo de questão ${hlp("questoes")}</div>
+        <div class="q-fontes">
+          <button class="q-fonte ${cfg.fonte === "cesg" ? "on" : ""}" data-f="cesg"><span class="t">Estilo da banca</span><span class="d">Múltipla escolha · provas reais da Cesgranrio (${QBANCO.cesg.length})</span></button>
+          <button class="q-fonte ${cfg.fonte === "lei" ? "on" : ""}" data-f="lei"><span class="t">Lei seca</span><span class="d">Certo ou errado · CF, CTN, ICMS e Simples (${QBANCO.lei.length} artigos)</span></button>
+        </div>
+        <div class="sec-title">Matéria</div>
+        <div class="q-chips">${chips}</div>
+        <button class="btn primary" id="q-start">Começar ${Q_POR_SESSAO} questões</button>
+        ${estado.qErradas.length ? `<button class="btn" id="q-erradas" style="width:100%;margin-top:12px">Refazer as erradas (${estado.qErradas.length})</button>` : ""}
+        <p class="q-credito">Questões da Cesgranrio: projeto QuestoesDeConcursoBot (GPL-3.0). Lei seca: app Lei Seca. Detalhes na aba Sobre.</p>
+      </div>`;
+    v.querySelectorAll(".q-fonte").forEach((b) => b.addEventListener("click", () => {
+      cfg.fonte = b.dataset.f; cfg.materia = "todas"; salvar(); renderQuestoes();
+    }));
+    v.querySelectorAll(".q-chip").forEach((b) => b.addEventListener("click", () => {
+      cfg.materia = b.dataset.m; salvar(); renderQuestoes();
+    }));
+    el("q-start").addEventListener("click", () => iniciarSessaoQuestoes(false));
+    const be = el("q-erradas");
+    if (be) be.addEventListener("click", () => iniciarSessaoQuestoes(true));
+  }
+
+  function renderQuestaoAtual(v) {
+    const s = qSessao, it = s.itens[s.i], resp = s.resp, respondida = resp !== null;
+    let corpo, fb = "";
+    if (it.tipo === "mc") {
+      const alts = it.alts.map((a, i) => {
+        let cls = "";
+        if (respondida && a.certa) cls = "certa";
+        else if (respondida && i === resp) cls = "errada";
+        return `<button class="q-alt ${cls}" data-i="${i}" ${respondida ? "disabled" : ""}><span class="letra">${"ABCDE"[i] || i + 1})</span><span>${esc(a.t)}</span></button>`;
+      }).join("");
+      corpo = `<div class="q-enun">${fmtEnun(it.e)}</div><div class="q-alts">${alts}</div>`;
+      if (respondida) {
+        const ok = !!it.alts[resp].certa;
+        const iCerta = it.alts.findIndex((a) => a.certa);
+        fb = `<div class="q-fb"><span class="tit">${ok ? "Acertou! ✨" : "Não foi dessa vez"}</span>${ok ? "" : `A resposta certa é a <strong>${"ABCDE"[iCerta]}</strong>.`}</div>`;
+      }
+    } else {
+      const clsC = respondida ? (it.certo ? "certa" : (resp === "certo" ? "errada" : "")) : "";
+      const clsE = respondida ? (!it.certo ? "certa" : (resp === "errado" ? "errada" : "")) : "";
+      corpo = `
+        <div class="q-lei-ref">${esc(it.r)} · julgue o texto abaixo:</div>
+        <div class="q-afirm">${esc(it.afirm)}</div>
+        <div class="q-ce">
+          <button class="btn ${clsC}" data-ce="certo" ${respondida ? "disabled" : ""}>Certo</button>
+          <button class="btn ${clsE}" data-ce="errado" ${respondida ? "disabled" : ""}>Errado</button>
+        </div>`;
+      if (respondida) {
+        const ok = (resp === "certo") === it.certo;
+        fb = it.certo
+          ? `<div class="q-fb"><span class="tit">${ok ? "Acertou! ✨" : "Era CERTO"}</span>Esse é exatamente o texto da lei.</div>`
+          : `<div class="q-fb"><span class="tit">${ok ? "Acertou, era pegadinha! ✨" : "Pegadinha! Era ERRADO"}</span>${esc(it.expl)}<span class="orig"><strong>Texto original:</strong> ${esc(it.o)}</span></div>`;
+      }
+    }
+    const tag = it.tipo === "mc" ? `Cesgranrio · ${esc(it.p)}` : esc(it.l);
+    v.innerHTML = `
+      <div class="q-wrap">
+        <div class="card">
+          <div class="q-head"><span class="q-tag">${tag}</span><span>${s.erradas ? "refazendo erradas · " : ""}${s.i + 1} de ${s.itens.length}</span></div>
+          <div style="font-family:var(--f-hand);font-size:16px;color:var(--text-2);margin-bottom:8px">${esc(it.m)}</div>
+          ${corpo}
+          ${fb}
+          <div class="q-foot">
+            <span class="placar">acertos: ${s.acertos} de ${s.i + (respondida ? 1 : 0)}</span>
+            <span style="display:flex;gap:10px">
+              <button class="btn" id="q-sair">Encerrar</button>
+              ${respondida ? `<button class="btn primary" id="q-prox" style="width:auto">${s.i + 1 >= s.itens.length ? "Ver resultado" : "Próxima →"}</button>` : ""}
+            </span>
+          </div>
+        </div>
+      </div>`;
+    v.querySelectorAll(".q-alt").forEach((b) => b.addEventListener("click", () => responder(+b.dataset.i)));
+    v.querySelectorAll("[data-ce]").forEach((b) => b.addEventListener("click", () => responder(b.dataset.ce)));
+    const bp = el("q-prox"); if (bp) bp.addEventListener("click", proximaQuestao);
+    el("q-sair").addEventListener("click", () => {
+      if (s.i === 0 && !respondida) { qSessao = null; renderQuestoes(); return; }
+      s.fim = true;
+      s.itens = s.itens.slice(0, s.i + (respondida ? 1 : 0)); // só as que ela respondeu
+      renderQuestoes();
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function renderResultadoQ(v) {
+    const s = qSessao, n = s.itens.length || 1;
+    const pct = Math.round((s.acertos / n) * 100);
+    const msg = pct >= 80 ? "Mandou muito bem!" : pct >= 60 ? "Bom caminho!" : "Bora revisar!";
+    v.innerHTML = `
+      <div class="q-wrap">
+        <div class="card">
+          <div class="q-res">
+            <div class="msg">${msg}</div>
+            <div class="nota">${s.acertos}/${s.itens.length}</div>
+            <div class="meta-lbl">${pct}% de acertos nesta sessão</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="q-novo" style="flex:1">Nova sessão</button>
+            ${estado.qErradas.length ? `<button class="btn primary" id="q-refazer" style="flex:1">Refazer erradas (${estado.qErradas.length})</button>` : ""}
+          </div>
+        </div>
+      </div>`;
+    el("q-novo").addEventListener("click", () => { qSessao = null; renderQuestoes(); });
+    const br = el("q-refazer"); if (br) br.addEventListener("click", () => iniciarSessaoQuestoes(true));
   }
 
   /* ============================ TELA: REVISÕES =========================== */
@@ -693,9 +1029,8 @@
 
     const totalMin = estado.sessoes.reduce((a, s) => a + (s.minutos || 0), 0);
     const diasEstudados = new Set(estado.sessoes.filter((s) => (s.minutos || 0) > 0).map((s) => s.data)).size;
-    const totalQ = estado.sessoes.reduce((a, s) => a + (s.questoes || 0), 0);
-    const totalA = estado.sessoes.reduce((a, s) => a + (s.acertos || 0), 0);
-    const pctAc = totalQ ? Math.round(totalA / totalQ * 100) : 0;
+    const acG = acertosGeral();
+    const pctAc = acG.pct == null ? 0 : acG.pct;
 
     el("view-historico").innerHTML = `
       <div class="tiles" style="grid-template-columns:repeat(4,1fr)">
@@ -766,6 +1101,14 @@
         </ul>
       </div>
       <div class="card">
+        <h3>Questões e créditos</h3>
+        <ul style="font-size:14px;color:var(--text-2);line-height:1.7;margin:0;padding-left:18px">
+          <li><strong>Questões da Cesgranrio</strong> (múltipla escolha): provas do Banco do Brasil, Caixa, Eletrobrás, Agerio e Transpetro, do projeto <a href="https://github.com/GabrielRF/QuestoesDeConcursoBot" target="_blank" rel="noopener">QuestoesDeConcursoBot</a>, de Gabriel R. F., licença <strong>GPL-3.0</strong> (o arquivo de questões continua sob essa licença; veja a pasta <code>questoes/</code>).</li>
+          <li><strong>Lei seca</strong> (certo/errado): texto oficial do Planalto e pegadinhas do app Lei Seca. O ICMS aqui é a <strong>LC 87/96 (lei federal)</strong>; a Lei 7.014 da Bahia ainda não tem questões.</li>
+          <li><strong>Fontes</strong>: Caveat, Patrick Hand e Nunito (SIL OFL 1.1) e Permanent Marker (Apache 2.0). <strong>Arrastar e soltar</strong>: SortableJS (MIT).</li>
+        </ul>
+      </div>
+      <div class="card">
         <h3>Transparência</h3>
         <p style="font-size:14px;color:var(--text-2);line-height:1.6">Este app é uma ferramenta de <strong>organização</strong>, montada a partir de dados públicos da prova anterior. Ele <strong>não substitui o edital oficial</strong> e o conteúdo é um ponto de partida que pode ser editado e ajustado a qualquer momento.</p>
       </div>
@@ -778,7 +1121,7 @@
     if (!t) {
       t = document.createElement("div");
       t.id = "toast";
-      t.style.cssText = "position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#1a1d21;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;z-index:50;opacity:0;transition:opacity .2s";
+      t.style.cssText = "position:fixed;left:50%;bottom:110px;transform:translateX(-50%) rotate(-1deg);background:#fbe9b7;color:#2b2b2b;border:2px solid #2b2b2b;border-radius:255px 15px 225px 15px/15px 225px 15px 255px;padding:8px 18px;font-family:'Patrick Hand',cursive;font-size:18px;z-index:70;opacity:0;transition:opacity .2s;box-shadow:2px 3px 0 rgba(43,43,43,.14);pointer-events:none";
       document.body.appendChild(t);
     }
     t.textContent = msg; t.style.opacity = "1";
@@ -828,6 +1171,9 @@
     estimativa: { t: "Estimativa", d: "Quanto tempo falta pra cobrir TODO o edital no seu ritmo atual. Se você aumentar as horas, os dias ou os tópicos por dia, esse prazo diminui." },
     cronometro: { t: "Cronômetro", d: "Conta o tempo enquanto você estuda. Quando terminar, escolha a matéria e o tópico e toque em \"Salvar sessão\"." },
     manual: { t: "Lançamento manual", d: "Estudou sem usar o cronômetro? Registre aqui os minutos e as questões que você fez. Dá pra marcar o tópico como concluído de uma vez." },
+    media: { t: "Média dos últimos 7 dias", d: "Quanto você estudou por dia, em média, na última semana (contando também os dias sem estudo)." },
+    acertos: { t: "Acertos", d: "Sua porcentagem de acertos, somando as questões da aba Questões e as que você lançou à mão no Registrar." },
+    questoes: { t: "Tipos de questão", d: "Estilo da banca: múltipla escolha de provas reais da Cesgranrio, pra pegar o jeito da banca. Lei seca: certo ou errado com o texto da lei; às vezes o texto vem certinho, às vezes com uma pegadinha trocada. As que você errar ficam guardadas pra refazer." },
   };
   function hlp(chave) {
     return `<button class="help" data-ajuda="${chave}" aria-label="O que é isso?">i</button>`;
@@ -890,18 +1236,22 @@
   }
 
   /* --------------------------- roteador ------------------------------------ */
-  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico, sobre: renderSobre };
+  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, questoes: renderQuestoes, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico, sobre: renderSobre };
   function irPara(view) {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     el("view-" + view).classList.add("active");
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === view));
-    if (timerInt && view !== "registrar") pausaTimer();
     (RENDER[view] || renderHoje)();
+    window.scrollTo(0, 0);
   }
   document.getElementById("nav").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-view]");
     if (b) irPara(b.dataset.view);
   });
+  // cronômetro flutuante: abre a tela Registrar (onde dá pra pausar e salvar)
+  el("float-timer").addEventListener("click", () => irPara("registrar"));
+  // ao voltar pro app (ex.: tablet desbloqueado), atualiza o relógio na hora
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) atualizaTimer(); });
 
   /* --------------------------- primeiro uso: nome -------------------------- */
   function pedirNome() {
@@ -929,4 +1279,6 @@
 
   // inicial
   renderHoje();
+  garantirTick();
+  atualizaTimer();
 })();

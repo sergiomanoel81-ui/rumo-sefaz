@@ -1,0 +1,5 @@
+/* Fontes embutidas (offline). Caveat, Patrick Hand e Nunito: SIL OFL 1.1. Permanent Marker: Apache 2.0. */
+@font-face{font-family:'Caveat';font-style:normal;font-weight:600;font-display:swap;src:url('caveat-600.woff2') format('woff2');}
+@font-face{font-family:'Nunito';font-style:normal;font-weight:400 700;font-display:swap;src:url('nunito.woff2') format('woff2');}
+@font-face{font-family:'Patrick Hand';font-style:normal;font-weight:400;font-display:swap;src:url('patrick-hand-400.woff2') format('woff2');}
+@font-face{font-family:'Permanent Marker';font-style:normal;font-weight:400;font-display:swap;src:url('permanent-marker-400.woff2') format('woff2');}

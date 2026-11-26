@@ -1,11 +1,18 @@
-const CACHE = "rumo-sefaz-v7";
+const CACHE = "rumo-sefaz-v8";
 const CORE = [
   "./",
   "index.html",
-  "styles.css?v=7",
-  "data.js?v=7",
-  "app.js?v=7",
-  "vendor/Sortable.min.js?v=7",
+  "styles.css?v=8",
+  "data.js?v=8",
+  "app.js?v=8",
+  "vendor/Sortable.min.js?v=8",
+  "fonts/fonts.css",
+  "fonts/caveat-600.woff2",
+  "fonts/nunito.woff2",
+  "fonts/patrick-hand-400.woff2",
+  "fonts/permanent-marker-400.woff2",
+  "questoes/cesgranrio.json?v=8",
+  "questoes/leiseca.json?v=8",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",

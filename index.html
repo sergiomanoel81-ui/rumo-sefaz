@@ -3,25 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0ca678" />
+  <meta name="theme-color" content="#fffdf7" />
   <title>Rumo à SEFAZ</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="preload" href="fonts/permanent-marker-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/patrick-hand-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="concurso">
-        <strong>SEFAZ-BA</strong> · Agente de Tributos
-      </div>
+      <div class="concurso">SEFAZ-BA <small>· Agente de Tributos</small></div>
       <span class="chip" id="chip-prova">edital em breve</span>
     </header>
 
     <main class="main">
       <section class="view active" id="view-hoje"></section>
       <section class="view" id="view-cronograma"></section>
+      <section class="view" id="view-questoes"></section>
       <section class="view" id="view-registrar"></section>
       <section class="view" id="view-revisoes"></section>
       <section class="view" id="view-historico"></section>
@@ -29,8 +30,10 @@
     </main>
 
     <nav class="nav" id="nav">
+      <div class="brand">Rumo à SEFAZ <small>caderno de estudos</small></div>
       <button data-view="hoje" class="on"><span class="ic">🏠</span>Hoje</button>
       <button data-view="cronograma"><span class="ic">📅</span>Cronograma</button>
+      <button data-view="questoes"><span class="ic">✏️</span>Questões</button>
       <button data-view="registrar"><span class="ic">⏱️</span>Registrar</button>
       <button data-view="revisoes"><span class="ic">🔄</span>Revisões</button>
       <button data-view="historico"><span class="ic">🗓️</span>Histórico</button>
@@ -38,8 +41,10 @@
     </nav>
   </div>
 
-  <script src="vendor/Sortable.min.js?v=7"></script>
-  <script src="data.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <button class="float-timer" id="float-timer" aria-label="Cronômetro de estudo"><span class="ic">⏱️</span><span id="ft-txt"></span></button>
+
+  <script src="vendor/Sortable.min.js?v=8"></script>
+  <script src="data.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
