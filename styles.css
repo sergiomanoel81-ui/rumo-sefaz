@@ -486,3 +486,97 @@ input:focus, select:focus { outline: 3px solid var(--yellow); outline-offset: 1p
   .q-fontes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .q-wrap { max-width: 820px; }
 }
+
+/* ===================== v9 ===================== */
+.dica { font-size: 14px; color: var(--ink-2); margin: 0 0 10px; line-height: 1.5; }
+.erro-form { color: #b3261e; font-size: 14px; min-height: 1em; margin: 8px 0 0; }
+#chip-prova { cursor: pointer; }
+
+/* revisão FSRS: Errei / Difícil / Bom / Fácil */
+.rev-item { padding: 10px 0 12px; border-bottom: 1.5px dashed var(--pencil); }
+.rev-item:last-child { border-bottom: none; }
+.rev-item .txt { font-size: 15px; margin-bottom: 8px; }
+.rev-notas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rn {
+  padding: 6px 4px; border: 2px solid var(--ink); border-radius: var(--hand);
+  font-family: var(--f-hand); font-size: 17px; line-height: 1.15; color: var(--ink);
+  display: flex; flex-direction: column; align-items: center; box-shadow: var(--sticker);
+}
+.rn:nth-child(even) { border-radius: var(--hand2); }
+.rn small { font-size: 13px; color: var(--ink-2); }
+.rn:active { transform: translate(1px, 2px); box-shadow: none; }
+.rn1 { background: var(--red); }
+.rn2 { background: var(--yellow); }
+.rn3 { background: var(--mint); }
+.rn4 { background: var(--sky); }
+
+/* leitor de lei */
+.modal.modal-lei { max-width: 760px; }
+.lei-busca { display: flex; gap: 8px; margin: 8px 0 10px; }
+.lei-busca .btn { padding: 6px 14px; }
+.lei-achados { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.lei-art { background: #fffefb; border: 2px solid var(--ink); border-radius: var(--hand2); padding: 12px 14px; }
+.lei-cab { margin-bottom: 8px; }
+.lei-cab strong { font-family: var(--f-mark); font-size: 20px; font-weight: 400; }
+.lei-cab small { display: block; font-family: var(--f-hand); font-size: 15px; color: var(--ink-2); }
+.lei-ln { margin: 0 0 6px; font-size: 15.5px; line-height: 1.6; }
+.lei-ln.rec { padding-left: 16px; }
+.lei-ln.hl { background: var(--yellow); border-radius: 6px; padding: 2px 6px; outline: 2px dashed var(--ink); }
+.lei-ln.hl.rec { padding-left: 16px; }
+.lei-fonte { font-size: 12px; color: var(--ink-3); margin: 10px 0 0; }
+.auto-nota { display: block; margin-top: 8px; font-size: 13px; color: var(--ink-2); font-style: italic; }
+
+/* simulados */
+.grafico { width: 100%; height: auto; display: block; }
+.g-guia { stroke: var(--pencil); stroke-width: 1.5; stroke-dasharray: 5 5; }
+.g-corte { stroke: #d8543a; stroke-width: 2; stroke-dasharray: 8 6; }
+.g-linha { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.g-pt { fill: var(--mint); stroke: var(--ink); stroke-width: 2.5; }
+.g-val { font-family: var(--f-mark); font-size: 16px; fill: var(--ink); }
+.g-txt { font-family: var(--f-hand); font-size: 14px; fill: var(--ink-2); }
+.sim-item { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1.5px dashed var(--pencil); }
+.sim-item:last-child { border-bottom: none; }
+.sim-item .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sim-item .meta { font-family: var(--f-hand); font-size: 15px; color: var(--ink-2); }
+.sim-pct { font-family: var(--f-mark); font-size: 22px; }
+.sim-del { width: 30px; height: 30px; border: 2px solid var(--ink); border-radius: var(--hand); background: #fff; font-size: 14px; }
+.tile .val small { white-space: nowrap; }
+
+/* contagem regressiva da prova */
+.prova-cont { display: flex; align-items: center; gap: 12px; font-family: var(--f-hand); font-size: 18px; line-height: 1.2; }
+.prova-cont .num { font-family: var(--f-mark); font-size: 46px; line-height: 1; background: var(--coral); border: 2px solid var(--ink); border-radius: var(--hand); padding: 4px 12px; }
+.prova-cont small { font-size: 15px; color: var(--ink-2); }
+
+/* capa (banner feito no Canva) */
+.capa { display: block; width: 100%; max-height: 190px; object-fit: cover; border: 2px solid var(--ink); border-radius: var(--hand2); box-shadow: var(--sticker); margin: 2px 0 14px; background: var(--paper); }
+
+@media (min-width: 760px) {
+  .nav button:nth-of-type(7) { background: #f6e7ff; }
+  .nav button:nth-of-type(8) { background: #fff; border-radius: var(--hand2); }
+}
+.rev-item .mat {
+  font-family: var(--f-hand); font-size: 15px; color: var(--ink); display: inline;
+  background: linear-gradient(transparent 58%, var(--yellow) 58%, var(--yellow) 92%, transparent 92%);
+}
+.rev-item .mat::after { content: ""; display: block; }
+
+/* capa do caderno (design feito no Canva) */
+.splash {
+  position: fixed; inset: 0; z-index: 80; padding: 20px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 31px, var(--line) 31px 32px);
+  transition: opacity .35s ease; cursor: pointer;
+}
+.splash.saindo { opacity: 0; pointer-events: none; }
+.splash img {
+  max-height: calc(100vh - 130px); max-width: 92vw; background: #fff;
+  border: 2px solid var(--ink); border-radius: 8px; box-shadow: 6px 8px 0 rgba(43, 43, 43, .18); transform: rotate(-1.5deg);
+}
+.splash .btn { font-size: 22px; padding: 10px 26px; background: var(--yellow); }
+.capa-mini { display: none; }
+.capa-sobre { display: block; width: min(260px, 70%); margin: 6px auto 18px; border: 2px solid var(--ink); border-radius: 6px; transform: rotate(-1.5deg); box-shadow: var(--sticker); }
+@media (min-width: 760px) {
+  .capa-mini { display: block; margin-left: auto; height: 118px; border: 2px solid var(--ink); border-radius: 6px; transform: rotate(3deg); box-shadow: var(--sticker); cursor: pointer; }
+}
+#view-simulados .grafico { max-height: 300px; }

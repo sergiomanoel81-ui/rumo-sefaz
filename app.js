@@ -44,6 +44,46 @@
   // v8: respostas da aba Questões e fila de questões erradas
   if (!Array.isArray(estado.respostas)) estado.respostas = []; // {d, m, f, ok}
   if (!Array.isArray(estado.qErradas)) estado.qErradas = []; // ids de questões
+  // v9: revisão adaptativa (FSRS), simulados e dados da prova
+  if (!estado.cards || typeof estado.cards !== "object") estado.cards = {}; // topicoId -> {c: card FSRS, m: materiaId, n: revisões feitas}
+  if (!Array.isArray(estado.revLog)) estado.revLog = []; // {d, t, r}
+  if (!Array.isArray(estado.simulados)) estado.simulados = []; // {id, data, nome, total, acertos, minutos, obs}
+  if (estado.concurso.posEdital == null) estado.concurso.posEdital = false;
+
+  /* --------------------------- FSRS (revisão adaptativa) ------------------- */
+  const FSRS_LIB = window.FSRS || null;
+  function diasAteProva() {
+    if (!estado.concurso.dataProva) return null;
+    return Math.round((new Date(estado.concurso.dataProva + "T00:00:00") - new Date(S.hojeISO() + "T00:00:00")) / 864e5);
+  }
+  function motorFSRS() {
+    if (!FSRS_LIB) return null;
+    const ate = diasAteProva();
+    const teto = ate && ate > 1 ? Math.min(60, ate) : 60; // nenhuma revisão depois da prova
+    return FSRS_LIB.fsrs(FSRS_LIB.generatorParameters({ enable_fuzz: false, enable_short_term: false, request_retention: 0.9, maximum_interval: teto }));
+  }
+  function hidratar(c) {
+    return Object.assign({}, c, { due: new Date(c.due), last_review: c.last_review ? new Date(c.last_review) : undefined });
+  }
+  function isoLocal(data) {
+    const d = new Date(data); d.setHours(0, 0, 0, 0);
+    return d.toISOString().slice(0, 10);
+  }
+  // revisões antigas (1/7/15/30 dias) viram cartões FSRS, vencendo na data da próxima revisão pendente
+  (function migrarRevisoesParaFSRS() {
+    if (estado.fsrsMigrado || !FSRS_LIB) return;
+    const prox = {};
+    (estado.revisoes || []).filter((r) => !r.feito).forEach((r) => {
+      if (!prox[r.topicoId] || r.data < prox[r.topicoId].data) prox[r.topicoId] = r;
+    });
+    Object.values(prox).forEach((r) => {
+      if (!estado.cards[r.topicoId]) {
+        estado.cards[r.topicoId] = { c: FSRS_LIB.createEmptyCard(new Date(r.data + "T09:00:00")), m: r.materiaId, n: 0 };
+      }
+    });
+    estado.fsrsMigrado = true;
+    S.salvarEstado(estado);
+  })();
 
   /* --------------------------- helpers de prioridade ----------------------- */
   const DIAS_NOME = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -240,22 +280,38 @@
   }
 
   /* --------------------------- revisões ------------------------------------ */
+  // Ao concluir um tópico, nasce um cartão FSRS (o estudo conta como "Bom").
   function agendarRevisoes(topicoId, materiaId) {
-    const base = S.hojeISO();
-    [1, 7, 15, 30].forEach((d) => {
-      estado.revisoes.push({
-        id: S.uid("rev"),
-        topicoId, materiaId,
-        data: S.addDiasISO(base, d),
-        feito: false,
-      });
-    });
+    const F = motorFSRS();
+    if (!F) return;
+    const agora = new Date();
+    const c = F.next(FSRS_LIB.createEmptyCard(agora), agora, FSRS_LIB.Rating.Good).card;
+    estado.cards[topicoId] = { c, m: materiaId, n: 0 };
+  }
+  function cancelarRevisoes(topicoId) { delete estado.cards[topicoId]; }
+  function cartoes() {
+    return Object.entries(estado.cards).map(([topicoId, x]) => ({ topicoId, materiaId: x.m, n: x.n || 0, c: x.c, data: isoLocal(x.c.due) }));
   }
   function revisoesPendentes() {
     const hoje = S.hojeISO();
-    return estado.revisoes
-      .filter((r) => !r.feito && r.data <= hoje)
-      .sort((a, b) => a.data.localeCompare(b.data));
+    return cartoes().filter((r) => r.data <= hoje).sort((a, b) => a.data.localeCompare(b.data));
+  }
+  // prévia de quando volta cada resposta (Errei/Difícil/Bom/Fácil), em dias
+  function previaRevisao(topicoId) {
+    const F = motorFSRS(), x = estado.cards[topicoId];
+    if (!F || !x) return null;
+    const agora = new Date();
+    const r = F.repeat(hidratar(x.c), agora);
+    const dias = (due) => Math.max(1, Math.round((new Date(due) - agora) / 864e5));
+    return [1, 2, 3, 4].map((g) => dias(r[g].card.due));
+  }
+  function revisar(topicoId, nota) {
+    const F = motorFSRS(), x = estado.cards[topicoId];
+    if (!F || !x) return;
+    x.c = F.next(hidratar(x.c), new Date(), nota).card;
+    x.n = (x.n || 0) + 1;
+    estado.revLog.push({ d: S.hojeISO(), t: topicoId, r: nota });
+    salvar();
   }
   function nomeTopico(id) {
     for (const m of estado.materias) {
@@ -348,6 +404,7 @@
     el("view-hoje").innerHTML = `
       <div class="dash-head">
         <h1 class="saudacao">Oi, ${nome}!</h1>
+        <img class="capa-mini" id="capa-mini" src="img/capa.jpg" alt="Capa do caderno" />
       </div>
       <div class="tiles">
         <div class="tile"><div class="lbl">hoje</div><div class="val">${fmtMin(hojeMin)}</div></div>
@@ -400,6 +457,7 @@
     });
     const be = el("dash-erradas");
     if (be) be.addEventListener("click", () => { irPara("questoes"); iniciarSessaoQuestoes(true); });
+    el("capa-mini").addEventListener("click", () => mostrarCapa(null));
   }
 
   function toggleTopicoPlano(topId) {
@@ -410,7 +468,7 @@
         // desmarcar: volta a pendente e remove as revisões ainda não feitas desse tópico
         t.status = "estudando";
         t.estudadoEm = null;
-        estado.revisoes = estado.revisoes.filter((r) => !(r.topicoId === topId && !r.feito));
+        cancelarRevisoes(topId);
       } else {
         t.status = "concluido";
         t.estudadoEm = S.hojeISO();
@@ -420,6 +478,75 @@
       renderHoje();
       return;
     }
+  }
+
+  /* ============================ EDITAL E PROVA (pós-edital) =============== */
+  function diasEstudoAte(isoFim) {
+    let n = 0;
+    for (let iso = S.hojeISO(); iso < isoFim; iso = S.addDiasISO(iso, 1)) {
+      if (estado.perfil.diasEstudo.includes(new Date(iso + "T00:00:00").getDay())) n++;
+    }
+    return n;
+  }
+  function atualizarChip() {
+    const chip = el("chip-prova");
+    if (!chip) return;
+    const c = estado.concurso, d = diasAteProva();
+    let txt = c.posEdital ? "edital publicado" : "edital em breve";
+    if (d != null) txt = d > 1 ? `faltam ${d} dias` : d === 1 ? "prova amanhã!" : d === 0 ? "prova hoje! boa sorte" : "prova realizada";
+    chip.textContent = txt;
+    chip.title = "Toque para informar o edital e a data da prova";
+  }
+  function cardProvaHTML() {
+    const c = estado.concurso, d = diasAteProva();
+    const fase = c.posEdital ? "Pós-edital" : "Pré-edital";
+    let corpo;
+    if (d == null) {
+      corpo = `<p class="dica" style="margin:0">${c.posEdital ? "Edital publicado. Informe a data da prova pra ligar a contagem regressiva e o ajuste de ritmo." : "Ainda sem edital da Cesgranrio: o plano usa a prova FGV 2022 como referência. Quando sair, informe aqui a data da prova."}</p>`;
+    } else if (d < 0) {
+      corpo = `<p class="dica" style="margin:0">A prova foi em ${c.dataProva.slice(8)}/${c.dataProva.slice(5, 7)}. Torcendo por você! 🍀</p>`;
+    } else {
+      const pend = ordenarPendentes().length;
+      const dias = diasEstudoAte(c.dataProva);
+      const precisa = dias ? Math.ceil(pend / dias) : pend;
+      const ok = precisa <= estado.perfil.topicosPorDia;
+      corpo = `
+        <div class="prova-cont"><span class="num">${d}</span><span>${d === 1 ? "dia" : "dias"} até a prova<br><small>${dias} dias de estudo no seu plano · ${pend} tópicos pendentes</small></span></div>
+        <p class="dica" style="margin:8px 0 0">${pend === 0 ? "Edital todo concluído! Agora é revisão e questões. 💪"
+          : ok ? `✅ No ritmo atual (${estado.perfil.topicosPorDia} tópicos/dia) dá pra cobrir o edital antes da prova.`
+          : `⚠️ Pra cobrir o edital até a prova, precisa de <strong>${precisa} tópicos por dia</strong> (hoje: ${estado.perfil.topicosPorDia}).`}</p>
+        ${!ok && pend ? `<button class="btn" id="prova-ajustar" style="width:100%;margin-top:10px">Ajustar pra ${precisa} tópicos/dia</button>` : ""}`;
+    }
+    return `<div class="card">
+      <div class="sec-title" style="margin-top:0">Edital e prova <span class="chip" style="transform:none">${fase}</span></div>
+      ${corpo}
+      <button class="btn" id="prova-editar" style="width:100%;margin-top:10px">${d == null ? "Informar edital e data da prova" : "Alterar dados da prova"}</button>
+    </div>`;
+  }
+  function modalProva() {
+    const c = estado.concurso;
+    const bg = abrirModal(`
+      <h3>Edital e prova</h3>
+      <p class="sub">Quando a Cesgranrio publicar o edital, marque aqui e informe a data da prova.</p>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="p-edital" style="width:auto" ${c.posEdital ? "checked" : ""} /> O edital já foi publicado</label>
+      <label>Data da prova</label><input type="date" id="p-data" value="${c.dataProva || ""}" />
+      <label>Nota de corte esperada, em % (opcional)</label><input type="number" id="p-corte" min="0" max="100" value="${c.notaCorte || ""}" placeholder="ex.: 70" />
+      <p class="dica">O conteúdo das matérias será atualizado pelo edital oficial numa próxima versão do app.</p>
+      <p class="erro-form" id="p-erro"></p>
+      <div class="btn-row"><button class="btn" id="mod-cancel" style="flex:1">Cancelar</button><button class="btn primary" id="mod-ok" style="flex:1">Salvar</button></div>`);
+    bg.querySelector("#mod-cancel").onclick = fecharModal;
+    bg.querySelector("#mod-ok").onclick = () => {
+      const data = bg.querySelector("#p-data").value;
+      const corte = bg.querySelector("#p-corte").value.trim();
+      if (corte && !(+corte >= 0 && +corte <= 100)) { bg.querySelector("#p-erro").textContent = "A nota de corte precisa estar entre 0 e 100."; return; }
+      c.posEdital = bg.querySelector("#p-edital").checked;
+      c.dataProva = data || null;
+      c.notaCorte = corte ? Math.round(+corte) : null;
+      salvar(); fecharModal(); atualizarChip();
+      const ativa = document.querySelector(".view.active");
+      if (ativa) irPara(ativa.id.replace("view-", ""));
+      toast("Dados da prova salvos!");
+    };
   }
 
   /* ============================ TELA: CRONOGRAMA ========================== */
@@ -469,6 +596,7 @@
 
     el("view-cronograma").innerHTML = `
       <div class="banner">📌 Este é o seu <strong>cronograma recomendado</strong> — montado automaticamente pelos pesos da prova. Tudo aqui é ajustável por você.</div>
+      ${cardProvaHTML()}
       <div class="sec-title">Modo de estudo ${hlp("modo")}</div>
       <div class="seg">
         <button data-modo="ciclo" class="${p.modo === "ciclo" ? "on" : ""}">Ciclo de Estudos</button>
@@ -495,6 +623,15 @@
       </div>
     `;
 
+    // edital e prova
+    el("prova-editar").addEventListener("click", modalProva);
+    const pa = el("prova-ajustar");
+    if (pa) pa.addEventListener("click", () => {
+      const dias = diasEstudoAte(estado.concurso.dataProva);
+      estado.perfil.topicosPorDia = Math.max(1, Math.ceil(ordenarPendentes().length / Math.max(1, dias)));
+      salvar(); renderCronograma(); // o plano de hoje fica como está; o novo ritmo vale a partir de amanhã
+      toast(`Ritmo ajustado: ${estado.perfil.topicosPorDia} tópicos por dia a partir de amanhã.`);
+    });
     // trocar modo
     el("view-cronograma").querySelectorAll(".seg button").forEach((b) =>
       b.addEventListener("click", () => {
@@ -704,8 +841,8 @@
     if (QBANCO) return Promise.resolve(QBANCO);
     if (!qCarregando) {
       qCarregando = Promise.all([
-        fetch("questoes/cesgranrio.json?v=8").then((r) => r.json()),
-        fetch("questoes/leiseca.json?v=8").then((r) => r.json()),
+        fetch("questoes/cesgranrio.json?v=9").then((r) => r.json()),
+        fetch("questoes/leiseca.json?v=9").then((r) => r.json()),
       ]).then(([c, l]) => {
         QBANCO = { cesg: c.questoes || [], lei: l.questoes || [] };
         qErro = false;
@@ -729,7 +866,7 @@
     }
     const usarPegadinha = q.v && q.v.length && Math.random() < 0.55;
     const v = usarPegadinha ? q.v[Math.floor(Math.random() * q.v.length)] : null;
-    return { tipo: "ce", id: q.id, m: q.m, l: q.l, r: q.r, o: q.o, afirm: v ? v.t : q.o, certo: !v, expl: v ? v.e : "" };
+    return { tipo: "ce", id: q.id, m: q.m, l: q.l, r: q.r, o: q.o, afirm: v ? v.t : q.o, certo: !v, expl: v ? v.e : "", auto: !!(v && v.a) };
   }
   function iniciarSessaoQuestoes(soErradas) {
     return carregarQuestoes().then((B) => {
@@ -809,12 +946,13 @@
         <div class="sec-title">Tipo de questão ${hlp("questoes")}</div>
         <div class="q-fontes">
           <button class="q-fonte ${cfg.fonte === "cesg" ? "on" : ""}" data-f="cesg"><span class="t">Estilo da banca</span><span class="d">Múltipla escolha · provas reais da Cesgranrio (${QBANCO.cesg.length})</span></button>
-          <button class="q-fonte ${cfg.fonte === "lei" ? "on" : ""}" data-f="lei"><span class="t">Lei seca</span><span class="d">Certo ou errado · CF, CTN, ICMS e Simples (${QBANCO.lei.length} artigos)</span></button>
+          <button class="q-fonte ${cfg.fonte === "lei" ? "on" : ""}" data-f="lei"><span class="t">Lei seca</span><span class="d">Certo ou errado · CF, CTN, Lei 7.014 da BA, LC 87 e Simples (${QBANCO.lei.length} dispositivos)</span></button>
         </div>
         <div class="sec-title">Matéria</div>
         <div class="q-chips">${chips}</div>
         <button class="btn primary" id="q-start">Começar ${Q_POR_SESSAO} questões</button>
         ${estado.qErradas.length ? `<button class="btn" id="q-erradas" style="width:100%;margin-top:12px">Refazer as erradas (${estado.qErradas.length})</button>` : ""}
+        <button class="btn" id="q-leis" style="width:100%;margin-top:12px">📖 Ler a lei (CF, CTN, Lei 7.014, LC 87 e LC 123)</button>
         <p class="q-credito">Questões da Cesgranrio: projeto QuestoesDeConcursoBot (GPL-3.0). Lei seca: app Lei Seca. Detalhes na aba Sobre.</p>
       </div>`;
     v.querySelectorAll(".q-fonte").forEach((b) => b.addEventListener("click", () => {
@@ -824,6 +962,7 @@
       cfg.materia = b.dataset.m; salvar(); renderQuestoes();
     }));
     el("q-start").addEventListener("click", () => iniciarSessaoQuestoes(false));
+    el("q-leis").addEventListener("click", escolherLei);
     const be = el("q-erradas");
     if (be) be.addEventListener("click", () => iniciarSessaoQuestoes(true));
   }
@@ -858,7 +997,10 @@
         const ok = (resp === "certo") === it.certo;
         fb = it.certo
           ? `<div class="q-fb"><span class="tit">${ok ? "Acertou! ✨" : "Era CERTO"}</span>Esse é exatamente o texto da lei.</div>`
-          : `<div class="q-fb"><span class="tit">${ok ? "Acertou, era pegadinha! ✨" : "Pegadinha! Era ERRADO"}</span>${esc(it.expl)}<span class="orig"><strong>Texto original:</strong> ${esc(it.o)}</span></div>`;
+          : `<div class="q-fb"><span class="tit">${ok ? "Acertou, era pegadinha! ✨" : "Pegadinha! Era ERRADO"}</span>${esc(it.expl)}<span class="orig"><strong>Texto original:</strong> ${esc(it.o)}</span>${it.auto ? `<span class="auto-nota">Pegadinha gerada automaticamente a partir do texto oficial.</span>` : ""}</div>`;
+        if (leiDoRotulo(it.l) && chaveDoRef(it.r)) {
+          fb += `<button class="btn" id="q-lei" style="width:100%;margin-top:10px">📖 Ler o ${esc(it.r.split(",")[0])} inteiro</button>`;
+        }
       }
     }
     const tag = it.tipo === "mc" ? `Cesgranrio · ${esc(it.p)}` : esc(it.l);
@@ -881,6 +1023,7 @@
     v.querySelectorAll(".q-alt").forEach((b) => b.addEventListener("click", () => responder(+b.dataset.i)));
     v.querySelectorAll("[data-ce]").forEach((b) => b.addEventListener("click", () => responder(b.dataset.ce)));
     const bp = el("q-prox"); if (bp) bp.addEventListener("click", proximaQuestao);
+    const bl = el("q-lei"); if (bl) bl.addEventListener("click", () => abrirLei(leiDoRotulo(it.l), chaveDoRef(it.r), it.r));
     el("q-sair").addEventListener("click", () => {
       if (s.i === 0 && !respondida) { qSessao = null; renderQuestoes(); return; }
       s.fim = true;
@@ -912,6 +1055,108 @@
     const br = el("q-refazer"); if (br) br.addEventListener("click", () => iniciarSessaoQuestoes(true));
   }
 
+  /* ============================ LER A LEI ================================= */
+  const LEIS = [
+    { id: "cf", nome: "Constituição Federal" },
+    { id: "ctn", nome: "Código Tributário Nacional" },
+    { id: "lei7014", nome: "Lei 7.014/96 — ICMS da Bahia" },
+    { id: "lc87", nome: "LC 87/96 — Lei Kandir (ICMS)" },
+    { id: "lc123", nome: "LC 123/06 — Simples Nacional" },
+  ];
+  const LEI_CACHE = {};
+  function carregarLei(id) {
+    if (LEI_CACHE[id]) return Promise.resolve(LEI_CACHE[id]);
+    return fetch(`leis/${id}.json?v=9`).then((r) => r.json()).then((j) => (LEI_CACHE[id] = j));
+  }
+  function leiDoRotulo(l) {
+    if (!l) return null;
+    if (l.startsWith("CF")) return "cf";
+    if (l === "CTN") return "ctn";
+    if (l.includes("7.014")) return "lei7014";
+    if (l.includes("LC 87")) return "lc87";
+    if (l.includes("LC 123")) return "lc123";
+    return null;
+  }
+  function chaveDoRef(ref) {
+    const m = /Art\.\s*(\d+)[º°]?(?:-([A-Z]))?/.exec(ref || "");
+    return m ? m[1] + (m[2] ? "-" + m[2] : "") : null;
+  }
+  // rótulo do trecho pra destacar (ex.: "Art. 5º, XXIV" -> "XXIV -"; "§ 1º"; "a)")
+  function marcadorDoRef(ref) {
+    const partes = (ref || "").split(",").map((s) => s.trim());
+    if (partes.length < 2) return null;
+    const p = partes[partes.length - 1];
+    if (/^[IVXLC]+(-[A-Z])?$/.test(p)) return new RegExp("^" + p.replace("-", "\\-") + "\\s*[-–]");
+    if (p.startsWith("§")) return new RegExp("^" + p.replace(/\s+/g, "\\s*").replace("º", "[º°]?") + "\\b");
+    if (p.startsWith("Parágrafo")) return /^Parágrafo único/;
+    if (/^[a-z]$/.test(p)) return new RegExp("^" + p + "\\)");
+    return null;
+  }
+  function abrirLei(id, chave, ref) {
+    abrirModal(`<div class="lei-box"><div class="empty">Abrindo a lei…</div></div>`).querySelector(".modal").classList.add("modal-lei");
+    carregarLei(id).then((L) => {
+      let idx = Math.max(0, L.artigos.findIndex((a) => a.k === chave));
+      const marca = marcadorDoRef(ref);
+      const desenhar = (destacar) => {
+        const a = L.artigos[idx];
+        const linhas = a.t.split("\n").map((ln) => {
+          const hl = destacar && marca && marca.test(ln) ? " hl" : "";
+          const recuo = /^([IVXLC]+(-[A-Z])?\s*[-–]|[a-z]\)|\d+\.)/.test(ln) ? " rec" : "";
+          return `<p class="lei-ln${hl}${recuo}">${esc(ln)}</p>`;
+        }).join("");
+        const box = document.querySelector("#modal-bg .lei-box");
+        if (!box) return;
+        box.innerHTML = `
+          <h3>📖 ${esc(L.nome)}</h3>
+          <div class="lei-busca"><input type="search" id="lei-q" placeholder="nº do artigo ou palavra (ex.: 155, alíquota)" /><button class="btn" id="lei-ir">Buscar</button></div>
+          <div id="lei-res"></div>
+          <div class="lei-art">
+            <div class="lei-cab"><strong>${esc(a.a)}</strong>${a.loc ? `<small>${esc(a.loc)}</small>` : ""}</div>
+            ${linhas}
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="lei-ant" ${idx === 0 ? "disabled" : ""} style="flex:1">‹ anterior</button>
+            <button class="btn" id="lei-fechar" style="flex:1">Fechar</button>
+            <button class="btn" id="lei-prox" ${idx >= L.artigos.length - 1 ? "disabled" : ""} style="flex:1">próximo ›</button>
+          </div>
+          <p class="lei-fonte">${esc(L.fonte)}${L.credito ? ` · ${esc(L.credito)}` : ""}${id === "lei7014" ? " · dispositivos revogados não aparecem" : ""}</p>`;
+        box.querySelector("#lei-ant").onclick = () => { idx--; desenhar(false); };
+        box.querySelector("#lei-prox").onclick = () => { idx++; desenhar(false); };
+        box.querySelector("#lei-fechar").onclick = fecharModal;
+        const buscar = () => {
+          const q = box.querySelector("#lei-q").value.trim();
+          if (!q) return;
+          const num = /^\d+(-[a-z])?$/i.test(q) ? q.toUpperCase() : null;
+          if (num) {
+            const i = L.artigos.findIndex((x) => x.k === num);
+            if (i >= 0) { idx = i; desenhar(false); } else toast("Artigo não encontrado nesta lei.");
+            return;
+          }
+          const termo = q.toLowerCase();
+          const achados = L.artigos.map((x, i) => ({ x, i })).filter(({ x }) => x.t.toLowerCase().includes(termo)).slice(0, 15);
+          box.querySelector("#lei-res").innerHTML = achados.length
+            ? `<div class="lei-achados">${achados.map(({ x, i }) => `<button class="q-chip" data-i="${i}">${esc(x.a)}</button>`).join("")}</div>`
+            : `<p class="dica">Nada encontrado com "${esc(q)}".</p>`;
+          box.querySelectorAll(".lei-achados [data-i]").forEach((b) => (b.onclick = () => { idx = +b.dataset.i; desenhar(false); }));
+        };
+        box.querySelector("#lei-ir").onclick = buscar;
+        box.querySelector("#lei-q").addEventListener("keydown", (e) => { if (e.key === "Enter") buscar(); });
+        const alvo = box.querySelector(".lei-ln.hl");
+        if (alvo) alvo.scrollIntoView({ block: "center" });
+        else box.closest(".modal").scrollTop = 0;
+      };
+      desenhar(true);
+    }).catch(() => {
+      const box = document.querySelector("#modal-bg .lei-box");
+      if (box) box.innerHTML = `<div class="empty">Não consegui abrir a lei agora.</div><button class="btn" onclick="document.getElementById('modal-bg').remove()" style="width:100%">Fechar</button>`;
+    });
+  }
+  function escolherLei() {
+    const bg = abrirModal(`<h3>📖 Ler a lei</h3><p class="sub">Texto oficial, artigo por artigo. Funciona sem internet.</p>
+      <div class="pick">${LEIS.map((l) => `<button data-lei="${l.id}">${esc(l.nome)}</button>`).join("")}</div>`);
+    bg.querySelectorAll("[data-lei]").forEach((b) => b.addEventListener("click", () => abrirLei(b.dataset.lei, null, null)));
+  }
+
   /* ============================ TELA: REVISÕES =========================== */
   function renderRevisoes() {
     const hoje = S.hojeISO();
@@ -922,55 +1167,139 @@
       const dow = DOW[new Date(iso + "T00:00:00").getDay()];
       return `${dow} ${iso.slice(8)}/${iso.slice(5, 7)}`;
     }
-    function ordinal(r) {
-      const todas = estado.revisoes
-        .filter((x) => x.topicoId === r.topicoId)
-        .sort((a, b) => a.data.localeCompare(b.data));
-      return todas.findIndex((x) => x.id === r.id) + 1;
-    }
-    function linha(r, due) {
+    const NOMES = ["Errei", "Difícil", "Bom", "Fácil"];
+    const fmtD = (n) => (n === 1 ? "1 dia" : `${n} dias`);
+    function linhaHoje(r) {
       const n = nomeTopico(r.topicoId);
-      return `<div class="task" data-rev="${r.id}">
-        ${due ? '<button class="box">✓</button>' : '<span class="box dash"></span>'}
-        <div class="txt"><div class="mat">${n.mat}</div>${n.top}</div>
-        <span class="revtag">${ordinal(r)}ª revisão</span>
+      const pv = previaRevisao(r.topicoId) || [1, 1, 1, 1];
+      return `<div class="rev-item" data-t="${r.topicoId}">
+        <div class="txt"><span class="mat">${esc(n.mat)}</span>${esc(n.top)} <span class="revtag">${r.n + 1}ª revisão</span></div>
+        <div class="rev-notas">${NOMES.map((nm, i) => `<button class="rn rn${i + 1}" data-nota="${i + 1}">${nm}<small>volta em ${fmtD(pv[i])}</small></button>`).join("")}</div>
       </div>`;
     }
+    function linhaProx(r) {
+      const n = nomeTopico(r.topicoId);
+      return `<div class="task"><span class="box dash"></span>
+        <div class="txt"><span class="mat">${esc(n.mat)}</span>${esc(n.top)}</div>
+        <span class="revtag">${r.n + 1}ª revisão</span></div>`;
+    }
 
-    const pend = estado.revisoes.filter((r) => !r.feito).sort((a, b) => a.data.localeCompare(b.data));
-    const dueHoje = pend.filter((r) => r.data <= hoje);
-    const prox = pend.filter((r) => r.data > hoje);
-
+    const todos = cartoes().sort((a, b) => a.data.localeCompare(b.data));
+    const dueHoje = todos.filter((r) => r.data <= hoje);
+    const prox = todos.filter((r) => r.data > hoje);
     const grupos = [];
     prox.forEach((r) => {
       let g = grupos.find((x) => x.data === r.data);
       if (!g) { g = { data: r.data, itens: [] }; grupos.push(g); }
       g.itens.push(r);
     });
-    const gruposHTML = grupos.slice(0, 10).map((g) => `
+    const gruposHTML = grupos.slice(0, 12).map((g) => `
       <div class="rev-group">
         <div class="rev-group-head"><span>${labelData(g.data)}</span><span class="rev-count">${g.itens.length}</span></div>
-        ${g.itens.map((r) => linha(r, false)).join("")}
+        ${g.itens.map(linhaProx).join("")}
       </div>`).join("");
 
     el("view-revisoes").innerHTML = `
       <div class="card">
-        <h3>Para revisar hoje <span style="color:var(--text-3);font-weight:400">(${dueHoje.length})</span> ${hlp("revisoes")}</h3>
-        ${dueHoje.length ? dueHoje.map((r) => linha(r, true)).join("") : '<div class="empty">Nada pendente por enquanto. ✨</div>'}
+        <h3>Para revisar hoje <span style="font-family:var(--f-hand);font-size:17px;color:var(--text-2)">(${dueHoje.length})</span> ${hlp("revisoes")}</h3>
+        ${dueHoje.length ? `<p class="dica">Revise o assunto e toque em como foi. O app calcula sozinho quando ele volta.</p>${dueHoje.map(linhaHoje).join("")}` : '<div class="empty">Nada pendente por enquanto. ✨</div>'}
       </div>
       <div class="card">
         <h3>Agenda de revisões</h3>
-        <p style="font-size:12px;color:var(--text-3);margin:0 0 6px">Cada tópico concluído volta pra revisar em <strong>1, 7, 15 e 30 dias</strong>. Por isso o mesmo assunto reaparece em datas diferentes — é de propósito, pra fixar.</p>
+        <p class="dica">As datas se ajustam à sua memória: o que você lembra fácil volta mais tarde, o que você erra volta logo${diasAteProva() != null && diasAteProva() > 0 ? ", e nada fica marcado depois da prova" : ""}.</p>
         ${grupos.length ? gruposHTML : '<div class="empty">Conforme você conclui tópicos, as revisões aparecem aqui.</div>'}
       </div>
     `;
-    el("view-revisoes").querySelectorAll('.task[data-rev] button.box').forEach((box) => {
-      const node = box.closest(".task[data-rev]");
-      box.addEventListener("click", () => {
-        const r = estado.revisoes.find((x) => x.id === node.dataset.rev);
-        if (r) { r.feito = true; salvar(); renderRevisoes(); }
-      });
-    });
+    el("view-revisoes").querySelectorAll(".rev-item [data-nota]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const t = b.closest(".rev-item").dataset.t;
+        revisar(t, +b.dataset.nota);
+        const x = estado.cards[t];
+        const dias = x ? Math.max(1, Math.round((new Date(x.c.due) - new Date()) / 864e5)) : 0;
+        toast(`Anotado! Volta em ${fmtD(dias)}.`);
+        renderRevisoes();
+      })
+    );
+  }
+
+  /* ============================ TELA: SIMULADOS ========================== */
+  const pctSim = (s) => (s.total ? Math.round((s.acertos / s.total) * 100) : 0);
+  function graficoSimulados(lista) {
+    if (lista.length < 2) return `<div class="empty" style="font-size:16px">Registre pelo menos 2 simulados pra ver sua evolução.</div>`;
+    const W = 600, H = 220, px = 34, py = 18;
+    const x = (i) => px + (i * (W - 2 * px)) / (lista.length - 1);
+    const y = (p) => py + ((100 - p) * (H - 2 * py)) / 100;
+    const pts = lista.map((s, i) => `${x(i).toFixed(1)},${y(pctSim(s)).toFixed(1)}`).join(" ");
+    const guias = [25, 50, 75].map((p) => `<line x1="${px}" x2="${W - px}" y1="${y(p)}" y2="${y(p)}" class="g-guia"/><text x="4" y="${y(p) + 4}" class="g-txt">${p}%</text>`).join("");
+    const meta = estado.concurso.notaCorte ? `<line x1="${px}" x2="${W - px}" y1="${y(estado.concurso.notaCorte)}" y2="${y(estado.concurso.notaCorte)}" class="g-corte"/><text x="${px + 6}" y="${y(estado.concurso.notaCorte) - 6}" class="g-txt">nota de corte (${estado.concurso.notaCorte}%)</text>` : "";
+    const pontos = lista.map((s, i) => `<circle cx="${x(i)}" cy="${y(pctSim(s))}" r="7" class="g-pt"/><text x="${x(i)}" y="${y(pctSim(s)) - 12}" text-anchor="middle" class="g-val">${pctSim(s)}%</text><text x="${x(i)}" y="${H - 2}" text-anchor="middle" class="g-txt">${s.data.slice(8)}/${s.data.slice(5, 7)}</text>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Evolução dos simulados">${guias}${meta}<polyline points="${pts}" class="g-linha"/>${pontos}</svg>`;
+  }
+  function renderSimulados() {
+    const lista = [...estado.simulados].sort((a, b) => a.data.localeCompare(b.data) || a.id.localeCompare(b.id));
+    const ult = lista[lista.length - 1], ant = lista[lista.length - 2];
+    const melhor = lista.reduce((m, s) => (!m || pctSim(s) > pctSim(m) ? s : m), null);
+    const media = lista.length ? Math.round(lista.reduce((a, s) => a + pctSim(s), 0) / lista.length) : null;
+    const delta = ult && ant ? pctSim(ult) - pctSim(ant) : null;
+    const deltaTxt = delta == null ? "" : `<small>${delta > 0 ? "▲ +" : delta < 0 ? "▼ " : "= "}${delta} pts</small>`;
+    const cards = [...lista].reverse().map((s) => {
+      const ritmo = s.minutos && s.total ? ` · ${(s.minutos / s.total).toFixed(1).replace(".", ",")} min/questão` : "";
+      return `<div class="sim-item">
+        <div class="txt"><strong>${esc(s.nome)}</strong><span class="meta">${s.data.slice(8)}/${s.data.slice(5, 7)}/${s.data.slice(0, 4)} · ${s.acertos}/${s.total} acertos${s.minutos ? ` · ${fmtMin(s.minutos)}` : ""}${ritmo}</span>${s.obs ? `<span class="meta">“${esc(s.obs)}”</span>` : ""}</div>
+        <span class="sim-pct">${pctSim(s)}%</span>
+        <button class="sim-del" data-id="${s.id}" aria-label="Apagar simulado">✕</button>
+      </div>`;
+    }).join("");
+    el("view-simulados").innerHTML = `
+      <div class="banner">📝 Fez um simulado (de cursinho, de prova antiga, do app)? Registre aqui o resultado pra acompanhar sua evolução até a prova.</div>
+      <div class="tiles">
+        <div class="tile"><div class="lbl">último</div><div class="val">${ult ? pctSim(ult) + "<small>%</small>" : "—"} ${deltaTxt}</div></div>
+        <div class="tile"><div class="lbl">melhor</div><div class="val">${melhor ? pctSim(melhor) + "<small>%</small>" : "—"}</div></div>
+        <div class="tile"><div class="lbl">média</div><div class="val">${media == null ? "—" : media + "<small>%</small>"}</div></div>
+        <div class="tile"><div class="lbl">simulados</div><div class="val">${lista.length}</div></div>
+      </div>
+      <button class="btn primary" id="sim-novo" style="margin-bottom:16px">+ Registrar simulado</button>
+      <div class="card"><h3>Evolução ${hlp("simulados")}</h3>${graficoSimulados(lista)}</div>
+      <div class="card"><h3>Seus simulados</h3>${cards || '<div class="empty" style="font-size:16px">Nenhum simulado ainda.</div>'}</div>`;
+    el("sim-novo").addEventListener("click", modalSimulado);
+    el("view-simulados").querySelectorAll(".sim-del").forEach((b) => b.addEventListener("click", () => {
+      const s = estado.simulados.find((x) => x.id === b.dataset.id);
+      if (!s) return;
+      const bg = abrirModal(`<h3>Apagar simulado?</h3><p class="sub">"${esc(s.nome)}" (${pctSim(s)}%) vai sumir da lista e do gráfico. Não dá pra desfazer.</p>
+        <div class="btn-row"><button class="btn" id="mod-cancel" style="flex:1">Cancelar</button><button class="btn" id="mod-ok" style="flex:1;background:var(--red)">Apagar</button></div>`);
+      bg.querySelector("#mod-cancel").onclick = fecharModal;
+      bg.querySelector("#mod-ok").onclick = () => { estado.simulados = estado.simulados.filter((x) => x.id !== s.id); salvar(); fecharModal(); renderSimulados(); };
+    }));
+  }
+  function modalSimulado() {
+    const bg = abrirModal(`
+      <h3>Registrar simulado</h3>
+      <label>Nome</label><input type="text" id="s-nome" placeholder="Simulado SEFAZ-BA nº 1" />
+      <label>Data</label><input type="date" id="s-data" value="${S.hojeISO()}" />
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label>Questões</label><input type="number" id="s-total" min="1" placeholder="70" /></div>
+        <div style="flex:1"><label>Acertos</label><input type="number" id="s-acertos" min="0" placeholder="0" /></div>
+      </div>
+      <label>Tempo gasto, em minutos (opcional)</label><input type="number" id="s-min" min="0" placeholder="240" />
+      <label>Observação (opcional)</label><input type="text" id="s-obs" placeholder="ex.: errei muito em Contabilidade" />
+      <p class="erro-form" id="s-erro"></p>
+      <div class="btn-row"><button class="btn" id="mod-cancel" style="flex:1">Cancelar</button><button class="btn primary" id="mod-ok" style="flex:1">Salvar</button></div>`);
+    const v = (id) => bg.querySelector(id).value.trim();
+    bg.querySelectorAll("input").forEach((i) => i.addEventListener("input", () => (bg.querySelector("#s-erro").textContent = "")));
+    bg.querySelector("#mod-cancel").onclick = fecharModal;
+    bg.querySelector("#mod-ok").onclick = () => {
+      const total = +v("#s-total"), acertos = +v("#s-acertos"), minutos = +v("#s-min") || 0;
+      let erro = "";
+      if (!v("#s-nome")) erro = "Dê um nome ao simulado.";
+      else if (!v("#s-data")) erro = "Escolha a data.";
+      else if (!(total > 0)) erro = "Informe quantas questões tinha.";
+      else if (!(acertos >= 0) || acertos > total) erro = "Os acertos precisam estar entre 0 e o total de questões.";
+      if (erro) { bg.querySelector("#s-erro").textContent = erro; return; }
+      estado.simulados.push({ id: S.uid("sim"), data: v("#s-data"), nome: v("#s-nome"), total, acertos, minutos, obs: v("#s-obs") });
+      salvar(); fecharModal(); renderSimulados();
+      toast("Simulado registrado!");
+    };
+    bg.querySelector("#s-nome").focus();
   }
 
   /* ============================ TELA: HISTÓRICO ========================== */
@@ -1012,6 +1341,56 @@
     const bg = abrirModal(`<h3>${titulo}</h3><p class="sub">${fmtMin(total)} estudados</p>${linhas}<button class="btn primary" id="info-ok" style="width:100%;margin-top:10px">Fechar</button>`);
     bg.querySelector("#info-ok").addEventListener("click", fecharModal);
   }
+  function estatisticasHTML() {
+    // horas por matéria
+    const porMat = {};
+    estado.sessoes.forEach((s) => {
+      const n = nomeMateriaPorId(s.materiaId);
+      if (n && s.minutos) porMat[n] = (porMat[n] || 0) + s.minutos;
+    });
+    const mats = Object.entries(porMat).sort((a, b) => b[1] - a[1]);
+    const maxM = Math.max(1, ...mats.map((m) => m[1]));
+    const horasMat = mats.length
+      ? mats.map(([n, min]) => `<div class="row-prog"><span class="nome">${esc(n)}</span><span class="bar"><span style="width:${Math.round((min / maxM) * 100)}%"></span></span><span class="pct" style="width:56px">${fmtMin(min)}</span></div>`).join("")
+      : `<div class="empty" style="font-size:16px">Use o cronômetro ou o lançamento manual pra ver aqui.</div>`;
+    // últimas 8 semanas (segunda a domingo)
+    const semanas = [];
+    let ini = inicioSemana(S.hojeISO());
+    for (let w = 7; w >= 0; w--) {
+      const s0 = S.addDiasISO(ini, -7 * w);
+      let tot = 0;
+      for (let i = 0; i < 7; i++) tot += minutosDoDia(S.addDiasISO(s0, i));
+      semanas.push({ s0, tot });
+    }
+    const maxS = Math.max(1, ...semanas.map((s) => s.tot));
+    const semHTML = semanas.map((s, i) => `
+      <div class="col${i === semanas.length - 1 ? " hoje" : ""}" title="${fmtMin(s.tot)}">
+        <div class="bar-v" style="height:${Math.max(4, Math.round((s.tot / maxS) * 100))}%"></div>
+        <span>${s.s0.slice(8)}/${s.s0.slice(5, 7)}</span>
+      </div>`).join("");
+    // questões
+    const cesgR = estado.respostas.filter((r) => r.f === "cesg"), leiR = estado.respostas.filter((r) => r.f === "lei");
+    const pc = (arr) => (arr.length ? Math.round((arr.filter((r) => r.ok).length / arr.length) * 100) + "%" : "—");
+    const totTop = estado.materias.reduce((a, m) => a + m.topicos.length, 0);
+    const feitos = estado.materias.reduce((a, m) => a + m.topicos.filter((t) => t.status === "concluido").length, 0);
+    return `
+      <h2 class="sec-title" style="margin-top:6px">Estatísticas</h2>
+      <div class="grid-2">
+        <div class="col">
+          <div class="card"><h3>Horas por matéria</h3>${horasMat}</div>
+        </div>
+        <div class="col">
+          <div class="card"><h3>Últimas 8 semanas</h3><div class="week">${semHTML}</div></div>
+          <div class="card"><h3>Questões e revisões</h3>
+            <div class="ac-row"><span>Estilo da banca (Cesgranrio)</span><span><span class="n">${cesgR.length} respondidas</span> <span class="pct">${pc(cesgR)}</span></span></div>
+            <div class="ac-row"><span>Lei seca (certo/errado)</span><span><span class="n">${leiR.length} respondidas</span> <span class="pct">${pc(leiR)}</span></span></div>
+            <div class="ac-row"><span>Questões erradas pra refazer</span><span class="pct">${estado.qErradas.length}</span></div>
+            <div class="ac-row"><span>Revisões feitas</span><span class="pct">${estado.revLog.length}</span></div>
+            <div class="ac-row"><span>Tópicos concluídos</span><span><span class="n">de ${totTop}</span> <span class="pct">${feitos}</span></span></div>
+          </div>
+        </div>
+      </div>`;
+  }
   function renderHistorico() {
     if (!histMes) histMes = S.hojeISO().slice(0, 8) + "01";
     const y = parseInt(histMes.slice(0, 4)), mo = parseInt(histMes.slice(5, 7));
@@ -1050,6 +1429,7 @@
         <div class="cal-legend"><span>menos</span><i class="d1"></i><i class="d2"></i><i class="d3"></i><i class="d4"></i><span>mais</span></div>
         <p style="font-size:12px;color:var(--text-3);margin-top:10px">Toque num dia para ver o que você estudou.</p>
       </div>
+      ${estatisticasHTML()}
     `;
     el("cal-prev").addEventListener("click", () => { histMes = isoMesDelta(histMes, -1); renderHistorico(); });
     el("cal-next").addEventListener("click", () => { histMes = isoMesDelta(histMes, 1); renderHistorico(); });
@@ -1066,6 +1446,7 @@
     ];
     const linhasGerais = gerais.map(([n, q]) => `<tr><td>${n}</td><td>${q} questões</td></tr>`).join("");
     el("view-sobre").innerHTML = `
+      <img class="capa-sobre" src="img/capa.jpg" alt="Capa do caderno Rumo à SEFAZ" />
       <div class="card">
         <h3>Em que este app se baseia</h3>
         <p style="font-size:14px;color:var(--text-2);line-height:1.6">A lista de matérias e a prioridade de cada uma vêm da <strong>última prova já realizada</strong> para o cargo: concurso <strong>SEFAZ-BA — Agente de Tributos Estaduais</strong>, aplicado pela banca <strong>FGV em 2022</strong> (70 questões objetivas). Os pesos do cronograma seguem quantas questões cada matéria teve nessa prova — não são chutes.</p>
@@ -1095,7 +1476,7 @@
       <div class="card">
         <h3>Métodos de estudo usados</h3>
         <ul style="font-size:14px;color:var(--text-2);line-height:1.7;margin:0;padding-left:18px">
-          <li><strong>Revisão espaçada:</strong> cada tópico volta pra revisão em 1, 7, 15 e 30 dias.</li>
+          <li><strong>Revisão adaptativa (FSRS):</strong> o mesmo algoritmo do Anki. Depois de cada revisão você diz como foi, e o app calcula quando o assunto volta, sem passar da data da prova.</li>
           <li><strong>Ciclo de estudos:</strong> prioriza as matérias pelo peso que tiveram na prova.</li>
           <li><strong>Cronograma semanal:</strong> distribui os tópicos pelos dias de estudo.</li>
         </ul>
@@ -1104,8 +1485,12 @@
         <h3>Questões e créditos</h3>
         <ul style="font-size:14px;color:var(--text-2);line-height:1.7;margin:0;padding-left:18px">
           <li><strong>Questões da Cesgranrio</strong> (múltipla escolha): provas do Banco do Brasil, Caixa, Eletrobrás, Agerio e Transpetro, do projeto <a href="https://github.com/GabrielRF/QuestoesDeConcursoBot" target="_blank" rel="noopener">QuestoesDeConcursoBot</a>, de Gabriel R. F., licença <strong>GPL-3.0</strong> (o arquivo de questões continua sob essa licença; veja a pasta <code>questoes/</code>).</li>
-          <li><strong>Lei seca</strong> (certo/errado): texto oficial do Planalto e pegadinhas do app Lei Seca. O ICMS aqui é a <strong>LC 87/96 (lei federal)</strong>; a Lei 7.014 da Bahia ainda não tem questões.</li>
-          <li><strong>Fontes</strong>: Caveat, Patrick Hand e Nunito (SIL OFL 1.1) e Permanent Marker (Apache 2.0). <strong>Arrastar e soltar</strong>: SortableJS (MIT).</li>
+          <li><strong>Lei seca</strong> (certo/errado): CF, CTN, LC 87/96 e Simples com texto do Planalto e pegadinhas do app Lei Seca.</li>
+          <li><strong>Lei 7.014/96 (ICMS da Bahia)</strong>: texto oficial da <a href="https://mbusca.sefaz.ba.gov.br/DITRI/leis/leis_estaduais/legest_1996_7014_icmscomnotas.pdf" target="_blank" rel="noopener">SEFAZ-BA</a>, sem as notas de redação antiga. As pegadinhas dela foram <strong>geradas automaticamente</strong> a partir do texto (o app avisa quando é o caso); em dúvida, vale o texto original.</li>
+          <li><strong>Ler a lei</strong>: CF/88 e CTN do <a href="https://github.com/oliveiracarlosadv/Lex-Vade-Mecum" target="_blank" rel="noopener">Lex Vade Mecum</a>, de Carlos Alexandre Albuquerque Oliveira (Lex Tecnologias), CC BY 4.0. O texto das leis é de domínio público.</li>
+          <li><strong>Revisão adaptativa</strong>: <a href="https://github.com/open-spaced-repetition/ts-fsrs" target="_blank" rel="noopener">ts-fsrs</a> (MIT). <strong>Arrastar e soltar</strong>: SortableJS (MIT).</li>
+          <li><strong>Fontes</strong>: Caveat, Patrick Hand e Nunito (SIL OFL 1.1) e Permanent Marker (Apache 2.0).</li>
+          <li><strong>Capa do caderno</strong>: design feito no Canva, a partir do modelo "Caderno de Anotações".</li>
         </ul>
       </div>
       <div class="card">
@@ -1164,7 +1549,8 @@
     meta: { t: "Meta do dia", d: "Quanto tempo você quer estudar por dia. Você muda isso na aba Cronograma, em \"Horas/dia\"." },
     sequencia: { t: "Sequência 🔥", d: "Quantos dias seguidos você estudou. Estude pelo menos um pouquinho todos os dias pra não zerar a ofensiva!" },
     progresso: { t: "Progresso no edital", d: "A porcentagem do conteúdo que você já concluiu — no total e matéria por matéria. Vai subindo conforme você marca tópicos como estudados." },
-    revisoes: { t: "Revisões", d: "Quando você conclui um tópico, o app agenda ele pra você revisar depois (em 1, 7, 15 e 30 dias). Revisar espaçado ajuda a não esquecer." },
+    revisoes: { t: "Revisões", d: "Quando você conclui um tópico, ele volta pra revisão depois de alguns dias. Ao revisar, diga como foi: Errei, Difícil, Bom ou Fácil. O app usa o FSRS (o mesmo método do Anki) pra calcular a próxima data: o que você lembra fácil volta mais tarde, o que você erra volta logo." },
+    simulados: { t: "Simulados", d: "Registre cada simulado que fizer (de cursinho, de prova antiga ou do app). O gráfico mostra sua evolução e, se você informar a nota de corte na aba Cronograma, ela aparece como linha de referência." },
     modo: { t: "Ciclo x Semanal", d: "Ciclo de Estudos: uma fila que roda sem parar, ótima pra rotina imprevisível — você estuda o próximo quando dá, sem data fixa. Cronograma Semanal: organiza os tópicos em dias fixos, tipo um calendário." },
     prioridade: { t: "Prioridade das matérias", d: "Começa automática, pelo peso de cada matéria na última prova (Legislação da BA em primeiro). Toque na matéria pra escolher você mesma: Automático, Baixa, Média, Alta ou Máxima. Quanto maior, mais ela aparece no plano." },
     ritmo: { t: "Seu ritmo de estudo", d: "Personalize aqui: quantos minutos por dia (Horas/dia), em quais dias da semana (Dias) e quantos tópicos entram em cada dia (Tóp/dia). O plano e a estimativa recalculam na hora." },
@@ -1236,7 +1622,7 @@
   }
 
   /* --------------------------- roteador ------------------------------------ */
-  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, questoes: renderQuestoes, registrar: renderRegistrar, revisoes: renderRevisoes, historico: renderHistorico, sobre: renderSobre };
+  const RENDER = { hoje: renderHoje, cronograma: renderCronograma, questoes: renderQuestoes, registrar: renderRegistrar, revisoes: renderRevisoes, simulados: renderSimulados, historico: renderHistorico, sobre: renderSobre };
   function irPara(view) {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     el("view-" + view).classList.add("active");
@@ -1250,6 +1636,8 @@
   });
   // cronômetro flutuante: abre a tela Registrar (onde dá pra pausar e salvar)
   el("float-timer").addEventListener("click", () => irPara("registrar"));
+  // etiqueta do topo (edital / contagem regressiva): abre os dados da prova
+  el("chip-prova").addEventListener("click", modalProva);
   // ao voltar pro app (ex.: tablet desbloqueado), atualiza o relógio na hora
   document.addEventListener("visibilitychange", () => { if (!document.hidden) atualizaTimer(); });
 
@@ -1270,7 +1658,22 @@
     bg.querySelector("#mod-skip").addEventListener("click", fecharModal);
     bg.querySelector("#mod-nome").addEventListener("keydown", (e) => { if (e.key === "Enter") salvarNome(); });
   }
-  if (!estado.perfil.nome) setTimeout(pedirNome, 300);
+  // capa do caderno: aparece uma vez por dia ao abrir o app (toque pra abrir)
+  function mostrarCapa(depois) {
+    if (el("splash")) return;
+    const s = document.createElement("div");
+    s.className = "splash"; s.id = "splash";
+    s.innerHTML = `<img src="img/capa.jpg" alt="Capa: Rumo à SEFAZ, caderno de estudos" /><button class="btn">abrir o caderno ✏️</button>`;
+    document.body.appendChild(s);
+    s.addEventListener("click", () => {
+      estado.perfil.capaVista = S.hojeISO(); salvar();
+      s.classList.add("saindo");
+      setTimeout(() => { s.remove(); if (depois) depois(); }, 350);
+    }, { once: true });
+  }
+  const depoisDaCapa = () => { if (!estado.perfil.nome) setTimeout(pedirNome, 150); };
+  if (estado.perfil.capaVista !== S.hojeISO()) mostrarCapa(depoisDaCapa);
+  else depoisDaCapa();
 
   /* --------------------------- service worker ------------------------------ */
   if ("serviceWorker" in navigator) {
@@ -1279,6 +1682,7 @@
 
   // inicial
   renderHoje();
+  atualizarChip();
   garantirTick();
   atualizaTimer();
 })();
