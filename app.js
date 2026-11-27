@@ -105,68 +105,117 @@
   }
 
   /* --------------------------- motor do cronograma ------------------------- */
-  // Fila de tópicos pendentes, com rodízio ponderado pela prioridade:
-  // matéria "máxima" entra 4x por ciclo, "alta" 3x, etc. (Legislação BA primeiro).
+  // Regra (pedido da Clara): estudar PRIMEIRO as matérias de prioridade máxima,
+  // em rodízio entre elas, sem misturar com as de prioridade menor. Quando uma
+  // delas termina, entra a próxima da fila — ordenada por prioridade
+  // (alta > média > baixa) e, dentro da mesma prioridade, pela ordem manual.
+  // O nº de matérias estudadas ao mesmo tempo = quantas estão em "máxima".
+  function materiasOrdenadas() {
+    return [...estado.materias].sort((a, b) => pesoNum(b) - pesoNum(a) || a.ordem - b.ordem);
+  }
+  function tamanhoFoco() {
+    const mats = estado.materias;
+    if (!mats.length) return 1;
+    const topo = Math.max(...mats.map(pesoNum));
+    return Math.max(1, mats.filter((m) => pesoNum(m) === topo).length);
+  }
   function ordenarPendentes() {
-    // sequência segue a ordem manual das matérias; o peso (prioridade) define
-    // quantas vezes cada matéria entra por volta.
-    const mats = [...estado.materias].sort((a, b) => a.ordem - b.ordem);
-    const filas = mats.map((m) => ({
+    const filas = materiasOrdenadas().map((m) => ({
       m,
-      w: pesoNum(m),
-      tops: m.topicos
-        .filter((t) => t.status !== "concluido")
-        .sort((x, y) => x.ordem - y.ordem),
+      tops: m.topicos.filter((t) => t.status !== "concluido").sort((x, y) => x.ordem - y.ordem),
     }));
-    // Interleave por rodadas: em cada volta, a rodada 1 passa por todas as
-    // matérias (1 tópico cada), a rodada 2 só pelas de peso >= 2, e assim por
-    // diante. Isso VARIA as matérias dentro do dia, mas as de maior prioridade
-    // reaparecem mais vezes ao longo do ciclo.
-    const out = [];
-    const maxW = Math.max(1, ...filas.map((f) => f.w));
-    const total = filas.reduce((s, f) => s + f.tops.length, 0);
-    let guarda = 0;
-    while (out.length < total && guarda++ < 10000) {
-      let avancou = false;
-      for (let round = 1; round <= maxW; round++) {
-        for (const f of filas) {
-          if (f.w >= round && f.tops.length) {
-            out.push({ mat: f.m, top: f.tops.shift() });
-            avancou = true;
-          }
-        }
+    const K = tamanhoFoco();
+    let ativos = [];
+    let prox = 0;
+    const repor = () => {
+      ativos = ativos.filter((f) => f.tops.length);
+      while (ativos.length < K && prox < filas.length) {
+        const f = filas[prox++];
+        if (f.tops.length) ativos.push(f);
       }
-      if (!avancou) break;
+    };
+    repor();
+    const out = [];
+    let guarda = 0;
+    while (ativos.length && guarda++ < 50000) {
+      for (const f of ativos) if (f.tops.length) out.push({ mat: f.m, top: f.tops.shift() });
+      repor();
     }
     return out;
   }
-
-  function cicloResumo() {
-    // Em uma volta do ciclo: cada matéria pendente aparece pesoNum(m) vezes.
-    return [...estado.materias]
-      .filter((m) => m.topicos.some((t) => t.status !== "concluido"))
-      .sort((a, b) => a.ordem - b.ordem)
-      .map((m) => ({ nome: m.nome, n: pesoNum(m) }));
+  // Situação de cada matéria agora: estudando (no rodízio), na fila ou concluída.
+  function situacaoMaterias() {
+    const K = tamanhoFoco();
+    const sit = {};
+    let ativos = 0;
+    materiasOrdenadas().forEach((m) => {
+      const pend = m.topicos.filter((t) => t.status !== "concluido").length;
+      if (!pend) sit[m.id] = "concluida";
+      else if (ativos < K) { sit[m.id] = "estudando"; ativos++; }
+      else sit[m.id] = "fila";
+    });
+    return sit;
   }
-
+  function acharTopico(id) {
+    for (const m of estado.materias) {
+      const t = m.topicos.find((x) => x.id === id);
+      if (t) return { m, t };
+    }
+    return null;
+  }
+  // Recalcula o plano de hoje depois de mudar prioridade/ordem/ritmo: mantém o
+  // que ela já marcou como feito hoje e completa o resto com a nova ordem.
+  function replanejarHoje() {
+    const dia = diaDoPlano();
+    const pd = estado.perfil.planoDia;
+    const manter = (pd && pd.data === dia && Array.isArray(pd.ids) ? pd.ids : []).filter((id) => {
+      const x = acharTopico(id);
+      return x && x.t.status === "concluido";
+    });
+    const n = Math.max(1, estado.perfil.topicosPorDia);
+    const novos = ordenarPendentes().map((x) => x.top.id).filter((id) => !manter.includes(id)).slice(0, Math.max(0, n - manter.length));
+    estado.perfil.planoDia = { data: dia, ids: [...manter, ...novos] };
+  }
+  // Próximos dias: o 1º é o plano de hoje (fixo); os seguintes seguem a fila.
   function planoProximosDias(qtdDias) {
-    const fila = ordenarPendentes();
+    const { dia, itens } = planoDeHoje();
+    const jaNoPlano = new Set(itens.map((i) => i.top.id));
+    const fila = ordenarPendentes().filter((x) => !jaNoPlano.has(x.top.id));
     const porDia = Math.max(1, estado.perfil.topicosPorDia);
     const diasEstudo = estado.perfil.diasEstudo;
-    const resultado = [];
-    let iso = S.hojeISO();
-    let idx = 0;
-    let seg = 0;
-    while (resultado.length < qtdDias && seg++ < 90) {
+    const resultado = [{ iso: dia, dow: new Date(dia + "T00:00:00").getDay(), itens, hoje: true }];
+    let iso = S.addDiasISO(dia, 1);
+    let idx = 0, seg = 0;
+    while (resultado.length < qtdDias && idx < fila.length && seg++ < 120) {
       const dow = new Date(iso + "T00:00:00").getDay();
       if (diasEstudo.includes(dow)) {
-        const itens = fila.slice(idx, idx + porDia);
-        idx += itens.length;
-        resultado.push({ iso, dow, itens });
+        const its = fila.slice(idx, idx + porDia);
+        idx += its.length;
+        resultado.push({ iso, dow, itens: its });
       }
       iso = S.addDiasISO(iso, 1);
     }
     return resultado;
+  }
+  // Ajuste pedido pela Clara (v10): Máxima = as 6 que ela estuda primeiro;
+  // Constitucional entra em seguida; depois as demais. Roda uma vez.
+  function migrarPrioridadesV10() {
+    if (estado.prioridadesV10) return;
+    const ordem = [
+      ["Direito Tributário", "maxima"], ["Contabilidade Geral", "maxima"], ["Estatística", "maxima"],
+      ["Legislação Tributária Estadual (BA)", "maxima"], ["Língua Portuguesa", "maxima"], ["Raciocínio Lógico-Matemático", "maxima"],
+      ["Direito Constitucional", "alta"], ["Direito Administrativo", "media"], ["Noções de Informática", "media"],
+      ["Noções de Igualdade Racial", "baixa"],
+    ];
+    let n = 0;
+    ordem.forEach(([nome, tier]) => {
+      const m = estado.materias.find((x) => x.nome === nome);
+      if (m) { m.prioridade = tier; m.ordem = n++; }
+    });
+    estado.materias.filter((m) => !ordem.some(([nome]) => nome === m.nome)).forEach((m) => { m.ordem = n++; });
+    estado.prioridadesV10 = true;
+    replanejarHoje();
+    salvar();
   }
 
   // Dia que o "Plano de hoje" representa: hoje, se for dia de estudo; senão o próximo.
@@ -552,62 +601,55 @@
   /* ============================ TELA: CRONOGRAMA ========================== */
   function renderCronograma() {
     const p = estado.perfil;
-    const matsHTML = [...estado.materias]
-      .sort((a, b) => a.ordem - b.ordem)
-      .map((m) => {
-        const tier = prioridadeEfetiva(m);
-        const auto = m.prioridade === "auto" ? " · auto" : "";
-        return `
-          <div class="mat-row" data-mid="${m.id}">
-            <span class="grip" title="Arraste para reordenar">⣿</span>
-            <span class="nome">${m.nome}</span>
-            <span class="peso">${m.pesoQ}q${auto}</span>
-            <button class="badge ${tier}" data-mat="${m.id}">${TIER_LABEL[tier]}</button>
-          </div>`;
-      }).join("");
+    const sit = situacaoMaterias();
+    const SIT = { estudando: ["▶ estudando agora", "s-estudando"], fila: ["na fila", "s-fila"], concluida: ["✓ concluída", "s-concluida"] };
+    const GRUPOS = [
+      ["maxima", "Prioridade máxima", "estuda primeiro, em rodízio"],
+      ["alta", "Prioridade alta", "entra quando uma máxima terminar"],
+      ["media", "Prioridade média", "entra depois das altas"],
+      ["baixa", "Prioridade baixa", "fica pro final"],
+    ];
+    const linha = (m) => {
+      const tot = m.topicos.length, feitos = m.topicos.filter((t) => t.status === "concluido").length;
+      const [rot, cls] = SIT[sit[m.id]];
+      const tier = prioridadeEfetiva(m);
+      return `
+        <div class="mat-row" data-mid="${m.id}">
+          <span class="grip" title="Arraste para mudar a ordem ou o grupo">⣿</span>
+          <span class="nome">${esc(m.nome)}<span class="mat-sit ${cls}">${rot} · ${feitos}/${tot}</span></span>
+          <button class="badge ${tier}" data-mat="${m.id}">${TIER_LABEL[tier]}</button>
+        </div>`;
+    };
+    const ordenadas = materiasOrdenadas();
+    const gruposHTML = GRUPOS.map(([tier, titulo, sub]) => {
+      const ms = ordenadas.filter((m) => prioridadeEfetiva(m) === tier);
+      return `<div class="tier-head tier-${tier}">${titulo} <small>· ${sub}</small></div>
+        <div class="mat-lista" data-tier="${tier}">${ms.map(linha).join("") || '<div class="mat-vazio">arraste uma matéria pra cá</div>'}</div>`;
+    }).join("");
 
-    const diasTxt = p.diasEstudo.length === 7 ? "Todos" :
-      p.diasEstudo.map((d) => DIAS_NOME[d]).join(" ");
-
-    let planoHTML = "";
-    if (p.modo === "ciclo") {
-      const resumo = cicloResumo();
-      const maxN = 4;
-      planoHTML = `<div class="card">
-        <h3>Em cada volta do ciclo</h3>
-        <p style="font-size:12px;color:var(--text-3);margin:0 0 12px">Quanto maior a prioridade, mais blocos a matéria recebe por volta.</p>
-        ${resumo.length ? resumo.map((r) => `
-          <div class="ciclo-row">
-            <span class="nome">${r.nome}</span>
-            <span class="ciclo-bar"><span style="width:${Math.round(r.n / maxN * 100)}%"></span></span>
-            <span class="ciclo-n">${r.n}×</span>
-          </div>`).join("") : '<div class="empty">Edital concluído 🎉</div>'}
-      </div>`;
-    } else {
-      const dias = planoProximosDias(6);
-      planoHTML = `<div class="card"><h3>Próximos dias</h3>${
-        dias.map((d) => `
-          <div style="padding:8px 0;border-bottom:1px solid var(--border)">
-            <div style="font-size:12px;color:var(--text-3);margin-bottom:3px">${DIAS_NOME[d.dow]} · ${d.iso.slice(8)}/${d.iso.slice(5,7)}</div>
-            ${d.itens.length ? d.itens.map((it) => `<div style="font-size:13px">• ${it.top.nome} <span style="color:var(--text-3)">(${it.mat.nome.split(" ")[0]})</span></div>`).join("") : '<div style="font-size:13px;color:var(--text-3)">livre</div>'}
-          </div>`).join("")
-      }</div>`;
-    }
+    const diasTxt = p.diasEstudo.length === 7 ? "Todos" : p.diasEstudo.map((d) => DIAS_NOME[d]).join(" ");
+    const dias = planoProximosDias(7);
+    const ciclo = p.modo === "ciclo";
+    const proxHTML = dias.length && dias.some((d) => d.itens.length) ? dias.map((d, i) => `
+      <div class="dia-plano${d.hoje ? " dia-hoje" : ""}">
+        <div class="dia-cab">${ciclo ? `${i + 1}ª sessão${d.hoje ? " · hoje" : ""}` : `${DIAS_NOME[d.dow]} · ${d.iso.slice(8)}/${d.iso.slice(5, 7)}${d.hoje ? " · hoje" : ""}`}</div>
+        ${d.itens.length ? d.itens.map((it) => `<div class="dia-item${it.top.status === "concluido" ? " feito" : ""}"><span class="mat">${esc(it.mat.nome)}</span>${esc(it.top.nome)}</div>`).join("") : '<div class="dia-item">livre</div>'}
+      </div>`).join("") : '<div class="empty">Edital concluído 🎉</div>';
 
     el("view-cronograma").innerHTML = `
-      <div class="banner">📌 Este é o seu <strong>cronograma recomendado</strong> — montado automaticamente pelos pesos da prova. Tudo aqui é ajustável por você.</div>
+      <div class="banner">📌 Este é o seu <strong>cronograma recomendado</strong>. Primeiro as matérias de <strong>prioridade máxima</strong>; quando uma termina, entra a próxima da fila. Tudo aqui é ajustável por você.</div>
       ${cardProvaHTML()}
       <div class="sec-title">Modo de estudo ${hlp("modo")}</div>
       <div class="seg">
-        <button data-modo="ciclo" class="${p.modo === "ciclo" ? "on" : ""}">Ciclo de Estudos</button>
-        <button data-modo="semanal" class="${p.modo === "semanal" ? "on" : ""}">Cronograma Semanal</button>
+        <button data-modo="ciclo" class="${ciclo ? "on" : ""}">Ciclo de Estudos</button>
+        <button data-modo="semanal" class="${!ciclo ? "on" : ""}">Cronograma Semanal</button>
       </div>
       <div class="grid-2">
         <div class="col">
           <div class="card">
-            <div class="sec-title">Matérias por prioridade ${hlp("prioridade")}</div>
-            <div id="mat-list">${matsHTML}</div>
-            <p style="font-size:12px;color:var(--text-3);margin-top:10px">👆 Toque na etiqueta para a prioridade · arraste pelo ⣿ para reordenar.</p>
+            <div class="sec-title" style="margin-top:0">Ordem de estudo ${hlp("prioridade")}</div>
+            <p class="dica">👆 Toque na etiqueta pra mudar a prioridade, ou arraste pelo ⣿ pra mudar a ordem e o grupo. O plano muda na hora.</p>
+            ${gruposHTML}
           </div>
         </div>
         <div class="col">
@@ -618,25 +660,23 @@
             <button class="cfg" id="cfg-top"><div class="k">Tóp/dia</div><div class="v">${p.topicosPorDia}</div></button>
           </div>
           <div class="estimativa">🏁 No seu ritmo, cobre o edital em <strong>~${estimativaSemanas()} semanas</strong> ${hlp("estimativa")}</div>
-          ${planoHTML}
+          <div class="card"><h3>${ciclo ? "Próximas sessões" : "Próximos dias de estudo"}</h3>${proxHTML}</div>
         </div>
       </div>
     `;
 
+    const aplicar = (msg) => { replanejarHoje(); salvar(); renderCronograma(); if (msg) toast(msg); };
     // edital e prova
     el("prova-editar").addEventListener("click", modalProva);
     const pa = el("prova-ajustar");
     if (pa) pa.addEventListener("click", () => {
-      const dias = diasEstudoAte(estado.concurso.dataProva);
-      estado.perfil.topicosPorDia = Math.max(1, Math.ceil(ordenarPendentes().length / Math.max(1, dias)));
-      salvar(); renderCronograma(); // o plano de hoje fica como está; o novo ritmo vale a partir de amanhã
-      toast(`Ritmo ajustado: ${estado.perfil.topicosPorDia} tópicos por dia a partir de amanhã.`);
+      const dd = diasEstudoAte(estado.concurso.dataProva);
+      estado.perfil.topicosPorDia = Math.max(1, Math.ceil(ordenarPendentes().length / Math.max(1, dd)));
+      aplicar(`Ritmo ajustado: ${estado.perfil.topicosPorDia} tópicos por dia.`);
     });
     // trocar modo
     el("view-cronograma").querySelectorAll(".seg button").forEach((b) =>
-      b.addEventListener("click", () => {
-        estado.perfil.modo = b.dataset.modo; salvar(); renderCronograma();
-      })
+      b.addEventListener("click", () => { estado.perfil.modo = b.dataset.modo; salvar(); renderCronograma(); })
     );
     // escolher prioridade (seletor claro)
     el("view-cronograma").querySelectorAll(".badge[data-mat]").forEach((b) =>
@@ -646,26 +686,28 @@
     el("cfg-horas").addEventListener("click", modalHoras);
     el("cfg-top").addEventListener("click", () =>
       modalNumero("Tópicos por dia de estudo", "Quantos tópicos entram em cada dia do plano.", estado.perfil.topicosPorDia, 1, (v) => {
-        estado.perfil.topicosPorDia = v; salvar(); renderCronograma();
+        estado.perfil.topicosPorDia = v; aplicar("Plano atualizado.");
       })
     );
     el("cfg-dias").addEventListener("click", editarDias);
 
-    // arrastar para reordenar (SortableJS)
-    const lista = el("mat-list");
-    if (window.Sortable && lista) {
-      window.Sortable.create(lista, {
+    // arrastar: muda a ordem e, soltando em outro grupo, muda a prioridade
+    if (window.Sortable) {
+      const listas = [...el("view-cronograma").querySelectorAll(".mat-lista")];
+      listas.forEach((lista) => window.Sortable.create(lista, {
+        group: "materias",
         handle: ".grip",
+        draggable: ".mat-row",
         animation: 150,
         onEnd: () => {
-          const ids = [...lista.querySelectorAll(".mat-row")].map((r) => r.dataset.mid);
-          ids.forEach((id, i) => {
-            const m = estado.materias.find((x) => x.id === id);
-            if (m) m.ordem = i;
-          });
-          salvar(); renderCronograma();
+          let n = 0;
+          listas.forEach((l) => l.querySelectorAll(".mat-row").forEach((r) => {
+            const m = estado.materias.find((x) => x.id === r.dataset.mid);
+            if (m) { m.prioridade = l.dataset.tier; m.ordem = n++; }
+          }));
+          aplicar("Ordem atualizada — o plano já mudou.");
         },
-      });
+      }));
     }
   }
 
@@ -686,7 +728,7 @@
     );
     bg.querySelector("#mod-cancel").addEventListener("click", fecharModal);
     bg.querySelector("#mod-ok").addEventListener("click", () => {
-      if (sel.size) { estado.perfil.diasEstudo = [...sel].sort(); salvar(); renderCronograma(); }
+      if (sel.size) { estado.perfil.diasEstudo = [...sel].sort(); replanejarHoje(); salvar(); renderCronograma(); }
       fecharModal();
     });
   }
@@ -707,6 +749,8 @@
             </div>
             <div id="t-salvar" style="display:none;margin-top:12px">
               ${selectMateriaTopico("t")}
+              <label>Observação sobre a aula (opcional)</label>
+              <textarea id="t-obs" rows="3" placeholder="ex.: aula 3 do Estratégia; revisar o art. 12-A; dúvida em substituição tributária"></textarea>
               <button class="btn ok" id="t-save" style="width:100%;margin-top:12px">Salvar sessão</button>
             </div>
           </div>
@@ -721,12 +765,18 @@
               <div style="flex:1"><label>Questões</label><input type="number" id="m-q" min="0" placeholder="0" /></div>
               <div style="flex:1"><label>Acertos</label><input type="number" id="m-a" min="0" placeholder="0" /></div>
             </div>
+            <label>Observação sobre a aula (opcional)</label>
+            <textarea id="m-obs" rows="3" placeholder="o que viu, o que ficou de dúvida, o que precisa revisar"></textarea>
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
               <input type="checkbox" id="m-concluir" style="width:auto" /> marcar tópico como concluído
             </label>
             <button class="btn primary" id="m-save" style="margin-top:12px">Salvar lançamento</button>
           </div>
         </div>
+      </div>
+      <div class="card">
+        <h3>Anotações das aulas ${hlp("anotacoes")}</h3>
+        ${anotacoesHTML()}
       </div>
     `;
     ligarSelectMateriaTopico("t");
@@ -740,6 +790,35 @@
 
     // manual
     el("m-save").addEventListener("click", salvarManual);
+    // editar uma anotação
+    el("view-registrar").querySelectorAll("[data-editar-obs]").forEach((b) => b.addEventListener("click", () => editarObs(b.dataset.editarObs)));
+  }
+
+  function anotacoesHTML() {
+    const com = estado.sessoes.filter((s) => (s.obs || "").trim()).slice().reverse().slice(0, 20);
+    if (!com.length) return `<div class="empty" style="font-size:16px">Quando você escrever uma observação ao salvar uma aula, ela aparece aqui.</div>`;
+    return com.map((s) => {
+      const n = nomeTopico(s.topicoId);
+      const extra = [s.minutos ? fmtMin(s.minutos) : "", s.questoes ? `${s.acertos || 0}/${s.questoes} questões` : ""].filter(Boolean).join(" · ");
+      return `<div class="nota-aula">
+        <div class="nota-cab"><span class="mat">${esc(n.mat)}</span><span class="nota-data">${s.data.slice(8)}/${s.data.slice(5, 7)}${extra ? " · " + extra : ""}</span></div>
+        <div class="nota-top">${esc(n.top)}</div>
+        <div class="nota-txt">${esc(s.obs)}</div>
+        <button class="link-btn" data-editar-obs="${s.id}">editar</button>
+      </div>`;
+    }).join("");
+  }
+  function editarObs(id) {
+    const s0 = estado.sessoes.find((x) => x.id === id);
+    if (!s0) return;
+    const bg = abrirModal(`<h3>Observação da aula</h3><p class="sub">${esc(nomeTopico(s0.topicoId).top)}</p>
+      <textarea id="obs-txt" rows="5">${esc(s0.obs || "")}</textarea>
+      <div class="btn-row"><button class="btn" id="mod-cancel" style="flex:1">Cancelar</button><button class="btn primary" id="mod-ok" style="flex:1">Salvar</button></div>`);
+    bg.querySelector("#mod-cancel").onclick = fecharModal;
+    bg.querySelector("#mod-ok").onclick = () => {
+      s0.obs = bg.querySelector("#obs-txt").value.trim();
+      salvar(); fecharModal(); renderRegistrar(); toast("Observação salva!");
+    };
   }
 
   function selectMateriaTopico(pfx) {
@@ -808,8 +887,10 @@
     pausaTimer();
     const min = Math.round(timerSegs() / 60);
     if (min <= 0) { toast("Estude ao menos 1 minuto antes de salvar."); return; }
-    registrarSessao(el("t-mat").value, el("t-top").value, min, 0, 0, false);
+    registrarSessao(el("t-mat").value, el("t-top").value, min, 0, 0, false, el("t-obs").value);
+    el("t-obs").value = "";
     zerarTimer();
+    renderRegistrar();
     toast(`Sessão de ${min}min salva!`);
   }
   function salvarManual() {
@@ -817,12 +898,13 @@
     const q = +el("m-q").value || 0;
     const a = +el("m-a").value || 0;
     if (min <= 0 && q <= 0) { toast("Informe minutos ou questões."); return; }
-    registrarSessao(el("m-mat").value, el("m-top").value, min, q, a, el("m-concluir").checked);
-    el("m-min").value = ""; el("m-q").value = ""; el("m-a").value = ""; el("m-concluir").checked = false;
+    registrarSessao(el("m-mat").value, el("m-top").value, min, q, a, el("m-concluir").checked, el("m-obs").value);
+    renderRegistrar();
     toast("Lançamento salvo!");
   }
-  function registrarSessao(matId, topId, min, q, a, concluir) {
-    estado.sessoes.push({ id: S.uid("ses"), data: S.hojeISO(), materiaId: matId, topicoId: topId, minutos: min, questoes: q, acertos: a });
+  function registrarSessao(matId, topId, min, q, a, concluir, obs) {
+    const nota = (obs || "").trim();
+    estado.sessoes.push(Object.assign({ id: S.uid("ses"), data: S.hojeISO(), materiaId: matId, topicoId: topId, minutos: min, questoes: q, acertos: a }, nota ? { obs: nota } : {}));
     const m = estado.materias.find((x) => x.id === matId);
     const t = m && m.topicos.find((x) => x.id === topId);
     if (t) {
@@ -841,8 +923,8 @@
     if (QBANCO) return Promise.resolve(QBANCO);
     if (!qCarregando) {
       qCarregando = Promise.all([
-        fetch("questoes/cesgranrio.json?v=9").then((r) => r.json()),
-        fetch("questoes/leiseca.json?v=9").then((r) => r.json()),
+        fetch("questoes/cesgranrio.json?v=10").then((r) => r.json()),
+        fetch("questoes/leiseca.json?v=10").then((r) => r.json()),
       ]).then(([c, l]) => {
         QBANCO = { cesg: c.questoes || [], lei: l.questoes || [] };
         qErro = false;
@@ -1066,7 +1148,7 @@
   const LEI_CACHE = {};
   function carregarLei(id) {
     if (LEI_CACHE[id]) return Promise.resolve(LEI_CACHE[id]);
-    return fetch(`leis/${id}.json?v=9`).then((r) => r.json()).then((j) => (LEI_CACHE[id] = j));
+    return fetch(`leis/${id}.json?v=10`).then((r) => r.json()).then((j) => (LEI_CACHE[id] = j));
   }
   function leiDoRotulo(l) {
     if (!l) return null;
@@ -1336,7 +1418,7 @@
     const linhas = ss.map((s) => {
       const n = nomeTopico(s.topicoId);
       const q = s.questoes ? ` · ${s.acertos || 0}/${s.questoes}` : "";
-      return `<div class="task"><div class="txt"><div class="mat">${n.mat}</div>${n.top}</div><span class="meta">${fmtMin(s.minutos || 0)}${q}</span></div>`;
+      return `<div class="task"><div class="txt"><span class="mat">${esc(n.mat)}</span>${esc(n.top)}${s.obs ? `<span class="dia-obs">📝 ${esc(s.obs)}</span>` : ""}</div><span class="meta">${fmtMin(s.minutos || 0)}${q}</span></div>`;
     }).join("");
     const bg = abrirModal(`<h3>${titulo}</h3><p class="sub">${fmtMin(total)} estudados</p>${linhas}<button class="btn primary" id="info-ok" style="width:100%;margin-top:10px">Fechar</button>`);
     bg.querySelector("#info-ok").addEventListener("click", fecharModal);
@@ -1550,9 +1632,10 @@
     sequencia: { t: "Sequência 🔥", d: "Quantos dias seguidos você estudou. Estude pelo menos um pouquinho todos os dias pra não zerar a ofensiva!" },
     progresso: { t: "Progresso no edital", d: "A porcentagem do conteúdo que você já concluiu — no total e matéria por matéria. Vai subindo conforme você marca tópicos como estudados." },
     revisoes: { t: "Revisões", d: "Quando você conclui um tópico, ele volta pra revisão depois de alguns dias. Ao revisar, diga como foi: Errei, Difícil, Bom ou Fácil. O app usa o FSRS (o mesmo método do Anki) pra calcular a próxima data: o que você lembra fácil volta mais tarde, o que você erra volta logo." },
+    anotacoes: { t: "Anotações das aulas", d: "Ao salvar uma sessão (no cronômetro ou no lançamento manual), escreva o que viu, a dúvida ou o que precisa revisar. As observações ficam aqui e no dia correspondente do Histórico. Toque em editar pra corrigir." },
     simulados: { t: "Simulados", d: "Registre cada simulado que fizer (de cursinho, de prova antiga ou do app). O gráfico mostra sua evolução e, se você informar a nota de corte na aba Cronograma, ela aparece como linha de referência." },
     modo: { t: "Ciclo x Semanal", d: "Ciclo de Estudos: uma fila que roda sem parar, ótima pra rotina imprevisível — você estuda o próximo quando dá, sem data fixa. Cronograma Semanal: organiza os tópicos em dias fixos, tipo um calendário." },
-    prioridade: { t: "Prioridade das matérias", d: "Começa automática, pelo peso de cada matéria na última prova (Legislação da BA em primeiro). Toque na matéria pra escolher você mesma: Automático, Baixa, Média, Alta ou Máxima. Quanto maior, mais ela aparece no plano." },
+    prioridade: { t: "Ordem de estudo", d: "Você estuda primeiro as matérias de prioridade máxima, em rodízio entre elas (sem misturar com as outras). Quando uma delas termina, entra a próxima da fila: primeiro as de prioridade alta, depois média e por último baixa. Dentro de cada grupo, vale a ordem da lista. Toque na etiqueta pra mudar a prioridade ou arraste pelo ⣿ pra mudar a ordem e o grupo: o plano muda na hora, sem desmarcar o que você já fez hoje." },
     ritmo: { t: "Seu ritmo de estudo", d: "Personalize aqui: quantos minutos por dia (Horas/dia), em quais dias da semana (Dias) e quantos tópicos entram em cada dia (Tóp/dia). O plano e a estimativa recalculam na hora." },
     estimativa: { t: "Estimativa", d: "Quanto tempo falta pra cobrir TODO o edital no seu ritmo atual. Se você aumentar as horas, os dias ou os tópicos por dia, esse prazo diminui." },
     cronometro: { t: "Cronômetro", d: "Conta o tempo enquanto você estuda. Quando terminar, escolha a matéria e o tópico e toque em \"Salvar sessão\"." },
@@ -1579,10 +1662,10 @@
     const auto = prioridadeAutomatica(m);
     const opcoes = [
       { v: "auto", nome: "Automático", tag: `sugerido: ${TIER_LABEL[auto]}` },
-      { v: "maxima", nome: "Máxima", tag: "aparece muito" },
-      { v: "alta", nome: "Alta", tag: "" },
-      { v: "media", nome: "Média", tag: "" },
-      { v: "baixa", nome: "Baixa", tag: "aparece pouco" },
+      { v: "maxima", nome: "Máxima", tag: "estuda primeiro" },
+      { v: "alta", nome: "Alta", tag: "entra quando uma máxima terminar" },
+      { v: "media", nome: "Média", tag: "entra depois das altas" },
+      { v: "baixa", nome: "Baixa", tag: "fica pro final" },
     ];
     const botoes = opcoes.map((o) =>
       `<button data-v="${o.v}" class="${m.prioridade === o.v ? "on" : ""}">${o.nome}${o.tag ? `<span class="tag">${o.tag}</span>` : ""}</button>`
@@ -1593,7 +1676,7 @@
     `);
     bg.querySelectorAll(".pick button").forEach((b) =>
       b.addEventListener("click", () => {
-        m.prioridade = b.dataset.v; salvar(); fecharModal(); renderCronograma();
+        m.prioridade = b.dataset.v; replanejarHoje(); salvar(); fecharModal(); renderCronograma(); toast("Prioridade atualizada — o plano já mudou.");
       })
     );
   }
@@ -1681,6 +1764,7 @@
   }
 
   // inicial
+  migrarPrioridadesV10();
   renderHoje();
   atualizarChip();
   garantirTick();

@@ -580,3 +580,47 @@ input:focus, select:focus { outline: 3px solid var(--yellow); outline-offset: 1p
   .capa-mini { display: block; margin-left: auto; height: 118px; border: 2px solid var(--ink); border-radius: 6px; transform: rotate(3deg); box-shadow: var(--sticker); cursor: pointer; }
 }
 #view-simulados .grafico { max-height: 300px; }
+
+/* ===================== v10 ===================== */
+/* grupos de prioridade no Cronograma */
+.tier-head {
+  font-family: var(--f-mark); font-size: 16px; margin: 14px 0 4px; padding: 3px 10px;
+  border: 2px solid var(--ink); border-radius: var(--hand); display: inline-block;
+}
+.tier-head small { font-family: var(--f-hand); font-size: 14px; color: var(--ink-2); }
+.tier-maxima { background: var(--coral); }
+.tier-alta { background: var(--mint); }
+.tier-media { background: var(--yellow); }
+.tier-baixa { background: #fff; }
+.mat-lista { min-height: 44px; padding: 2px 0; border-left: 3px dashed var(--pencil); padding-left: 8px; margin-left: 4px; }
+.mat-vazio { font-family: var(--f-hand); font-size: 15px; color: var(--ink-3); padding: 10px 4px; }
+.mat-row .nome { display: flex; flex-direction: column; }
+.mat-sit { font-family: var(--f-hand); font-size: 14px; color: var(--ink-2); }
+.mat-sit.s-estudando { color: #1f6f58; }
+.mat-sit.s-concluida { color: var(--ink-3); text-decoration: line-through; }
+
+/* próximos dias / sessões */
+.dia-plano { padding: 8px 0; border-bottom: 1.5px dashed var(--pencil); }
+.dia-plano:last-child { border-bottom: none; }
+.dia-cab { font-family: var(--f-mark); font-size: 15px; margin-bottom: 3px; }
+.dia-hoje .dia-cab { background: linear-gradient(transparent 58%, var(--yellow) 58%, var(--yellow) 92%, transparent 92%); display: inline-block; }
+.dia-item { font-size: 14px; line-height: 1.45; margin: 2px 0 4px; }
+.dia-item .mat { font-family: var(--f-hand); font-size: 14px; color: var(--ink-2); display: block; }
+.dia-item.feito { color: var(--ink-3); text-decoration: line-through; }
+
+/* observação da aula */
+textarea {
+  width: 100%; padding: 9px 12px; font-family: var(--f-body); font-size: 15px; color: var(--ink); line-height: 1.5;
+  background: #fff; border: 2px solid var(--ink); border-radius: var(--hand2); resize: vertical;
+}
+textarea:focus { outline: 3px solid var(--yellow); outline-offset: 1px; }
+.nota-aula { position: relative; padding: 10px 12px; margin-bottom: 10px; background: #fffbea; border: 2px solid var(--ink); border-radius: var(--hand); box-shadow: var(--sticker); }
+.nota-aula:nth-child(even) { border-radius: var(--hand2); background: #f2fbf8; }
+.nota-cab { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.nota-cab .mat { font-family: var(--f-hand); font-size: 15px; background: linear-gradient(transparent 58%, var(--yellow) 58%, var(--yellow) 92%, transparent 92%); }
+.nota-data { font-family: var(--f-hand); font-size: 14px; color: var(--ink-2); }
+.nota-top { font-size: 14px; color: var(--ink-2); margin: 2px 0 6px; }
+.nota-txt { font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
+.link-btn { position: absolute; right: 10px; bottom: 6px; background: none; border: none; font-family: var(--f-hand); font-size: 15px; color: #1f6f58; text-decoration: underline; padding: 0; }
+.dia-obs { display: block; font-size: 14px; color: var(--ink-2); margin-top: 4px; white-space: pre-wrap; }
+@media (min-width: 760px) { .main { padding-bottom: 110px; } }
